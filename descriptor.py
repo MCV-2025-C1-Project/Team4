@@ -192,7 +192,7 @@ def create_center_crop_weight(H, W, discard_borders=0.1):
 
 class ColorSpace(enum.Enum):
     RGB = 'RGB'
-    GRAY = 'GRAY'
+    # GRAY = 'GRAY'
     HSV = 'HSV'
     LAB = 'LAB'
     YCRCB = 'YCRCB'
@@ -204,14 +204,14 @@ class ColorSpace(enum.Enum):
 
 class WeightStrategy(enum.Enum):
     PYRAMID = 'PYRAMID'
-    CUADRATIC_PYRAMID = 'CUADRATIC_PYRAMID'
-    CONE = 'CONE'
-    CUADRATIC_CONE = 'CUADRATIC_CONE'
+    # CUADRATIC_PYRAMID = 'CUADRATIC_PYRAMID'
+    # CONE = 'CONE'
+    # CUADRATIC_CONE = 'CUADRATIC_CONE'
     CENTER_CROP_10 = 'CENTER_CROP_10'
-    CENTER_CROP_20 = 'CENTER_CROP_20'
+    # CENTER_CROP_20 = 'CENTER_CROP_20'
 
 class ImageDescriptorMaker:
-    def __init__(self, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, weights: None | WeightStrategy):
+    def __init__(self, *, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, weights: None | WeightStrategy):
         
         assert keep_or_discard is None or len(color_spaces) == len(keep_or_discard)
 
@@ -234,8 +234,8 @@ class ImageDescriptorMaker:
             match color_space:
                 case ColorSpace.RGB:
                     descriptor_parts.append(self.compute_rgb_descriptor(image))
-                case ColorSpace.GRAY:
-                    descriptor_parts.append(self.compute_gray_descriptor(image))
+                # case ColorSpace.GRAY:
+                    # descriptor_parts.append(self.compute_gray_descriptor(image))
                 case ColorSpace.HSV:
                     descriptor_parts.append(self.compute_hsv_descriptor(image))
                 case ColorSpace.LAB:

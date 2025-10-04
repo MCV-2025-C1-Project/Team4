@@ -1,0 +1,60 @@
+import os
+from pathlib import Path
+from typing import Callable, Self
+import cv2
+import numpy as np
+
+from descriptor import ImageDescriptorMaker
+
+
+class Image:
+    def __init__(self, image: np.ndarray, author_title: str | None):
+        self.image = image
+        self.author_title = author_title
+        self.descriptor = None
+        self.distance = None
+
+class ImageDatabase:
+    def __init__(self, images: list[Image]):
+        self.images = images
+
+    def reset_descriptors_and_distances(self):
+        for image in self.images:
+            image.descriptor = None
+            image.distance = None
+
+    def compute_descriptors(self, descriptor_maker: ImageDescriptorMaker):
+        for image in self.images:
+            image.descriptor = descriptor_maker.make_descriptor(image.image)
+
+    def query(self, query_descriptor: np.ndarray, distance: Callable[[np.ndarray, np.ndarray], float], k):
+        for image in self.images:
+            image.distance = distance(image.descriptor, query_descriptor)
+
+        self.images.sort(key=lambda im: im.distance)
+
+        return self.images[:k]
+
+
+    @staticmethod
+    def load(database_path: str) -> 'ImageDatabase':
+        images: list[Image] = []
+        for filename in sorted(os.listdir(database_path)):
+            if not filename.endswith(".jpg"):
+                continue
+
+            image_path = os.path.join(database_path, filename)
+            image = cv2.imread(image_path)
+            if image is None:
+                raise ValueError(f"Could not read image {filename}.")
+            
+            painting_name_path = Path(image_path).with_suffix('.txt')
+            try:
+                author_title = painting_name_path.read_text(encoding="utf-8")
+            except Exception as e:
+                print(f"Image {filename} doesn't have associated .txt file.")
+                author_title = None
+
+            images.append(Image(image, author_title))
+
+        return ImageDatabase(images)

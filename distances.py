@@ -85,5 +85,19 @@ def emd_multichannel(h1: np.ndarray, h2: np.ndarray, num_channels: int, bins_per
     return total_emd
 
 
+def iter_simple_distances():
+    return [
+        ("euclidean_distance", euclidean_distance),
+        ("l1_distance", l1_distance),
+        ("x2_distance", x2_distance),
+        ("hist_intersection", hist_intersection),
+        ("hellinger_similarity", hellinger_similarity),
+        ("kl_divergence", kl_divergence),
+        ("jensen_shannon_divergence", jensen_shannon_divergence),
+        ("quadratic_form_distance", quadratic_form_distance),
+    ]
+
+
+
 if __name__ == "__main__":
    pass
