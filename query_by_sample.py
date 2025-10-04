@@ -3,7 +3,7 @@ import os
 from typing import Any
 import cv2
 from descriptor import ImageDescriptor
-from distances import euclidean_distance
+import distances
 from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle
@@ -86,7 +86,7 @@ def split_query_and_dataset(dataset: list[dict[str, Any]], query_name: str) -> t
 
 def find_k_closests(query: dict[str, Any], dataset: list[dict[str, Any]], k=2):
     for entry in dataset:
-        distance = euclidean_distance(entry['descriptor'], query['descriptor'])
+        distance = distances.l1_distance(entry['descriptor'], query['descriptor'])
         entry['distance'] = distance
 
     return list(sorted(dataset, key=lambda e: e['distance']))[:k]
@@ -100,7 +100,7 @@ def show_results(query, results):
 
     for i, entry in enumerate(results, start=1):
         plt.figure()
-        plt.title(f'Top {i}')
+        plt.title(f'Top {i}, distance = {entry["distance"]:.5f}')
         plt.imshow(cv2.cvtColor(entry['image'], cv2.COLOR_BGR2RGB))
         plt.show()
 
@@ -117,7 +117,7 @@ def main():
 
     for query in queries:
         print("Querying...")
-        closest_k = find_k_closests(query, database)
+        closest_k = find_k_closests(query, database, k=1)
         print("Showing...")
         show_results(query, closest_k)
 
