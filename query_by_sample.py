@@ -41,7 +41,7 @@ def parse_arguments():
     parser.add_argument("--weight_strategy", type=parse_weightstrategy, default=WeightStrategy.CENTER_CROP_15)
     parser.add_argument("--bins", type=int, default=32)
     parser.add_argument("--distance", type=parse_distance, default=distances.canberra_distance)
-    parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--pkl_output_path", type=str, default=None)
 
     return parser.parse_args()
@@ -86,11 +86,11 @@ def show_results(query, results):
 def main():
     args = parse_arguments()
 
-    print("Loading database..")
+    print("Loading database...")
     database = ImageDatabase.load(args.dataset_path)
-    print("Loading queries..")
+    print("Loading queries...")
     queries, ground_truth = load_queries(args.queries_path)
-    print("Computing descriptors..")
+    print("Computing descriptors...")
     descriptor_maker = ImageDescriptorMaker(
         blur_image=False,
         gamma_correction=args.gamma,
@@ -122,9 +122,12 @@ def main():
     if args.pkl_output_path:
         print("Dumping predictions pkl...")
         clean_results = [[image.id for image in top_k] for top_k in results]
-        queries_indexes = [query['id'] for query in queries]
+        queries_indexes = [[query['id']] for query in queries]
         pkl_content = [queries_indexes, clean_results]
-        pickle.dump(pkl_content, open(args.pkl_output_path, "wb"))
+        
+        # commented because we only have to give the results
+        # pickle.dump(pkl_content, open(args.pkl_output_path, "wb"))
+        pickle.dump(clean_results, open(args.pkl_output_path, "wb"))
 
 
 if __name__ == "__main__":
