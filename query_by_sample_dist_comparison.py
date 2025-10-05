@@ -6,39 +6,49 @@ import numpy as np
 import pickle
 from functools import partial
 import csv
-from descriptor import ImageDescriptor
-import distances as dist
+from libs_week1.descriptor import ImageDescriptor
+import libs_week1.distances as dist
 from query_by_sample import load_database, load_queries
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+
+# Adds computed descriptors to each entry in the dataset.
 def add_descriptors_to_dataset(dataset: list[dict[str, Any]], descriptor_maker: ImageDescriptor):
     for entry in dataset:
+        # Compute and assign descriptor for each image
         entry['descriptor'] = descriptor_maker.compute_descriptor(entry['image'])
 
+# Finds the top-k closest entries for a query using the given distance function.
 def find_closest(query: Dict[str, Any], dataset: List[Dict[str, Any]], distance_func: Callable, k: int):
     for entry in dataset:
+        # Calculate distance between image descriptors
         distance = distance_func(entry['descriptor'], query['descriptor'])
         entry['distance'] = distance
 
     similarity_functions = ['hist_intersection', 'hellinger_similarity']
 
+    # Determine function name depending if partial or not.
     if isinstance(distance_func, partial):
         func_name = distance_func.func.__name__
     else:
         func_name = distance_func.__name__
 
+    # For similarity functions, higher values are better.
     reverse_sort = func_name in similarity_functions
 
+    # Return top k entries sorted by distance.
     return list(sorted(dataset, key=lambda e: e['distance'], reverse=reverse_sort))[:k]
 
+# Calculates the average precision (AP) for predicted indices against the ground truth.
 def calculate_average_precision(ground_truth_indices: List[int], predicted_indices: List[int]) -> float:
     precision_at_k = []
     num_correct = 0
     for i, p in enumerate(predicted_indices):
         if p in ground_truth_indices:
             num_correct += 1
+            # Precision computed at each relevant retrieved element.
             precision_at_k.append(num_correct / (i + 1))
 
     if not precision_at_k:
@@ -46,10 +56,13 @@ def calculate_average_precision(ground_truth_indices: List[int], predicted_indic
 
     return np.mean(precision_at_k)
 
+# Runs evaluation comparing queries against the database with various distance functions.
 def run_evaluation(database, queries, ground_truth, descriptor_maker, top_k, csv_writer):
+    # Add descriptors to both database and queries.
     add_descriptors_to_dataset(database, descriptor_maker)
     add_descriptors_to_dataset(queries, descriptor_maker)
 
+    # Define distance functions to be tested.
     distance_functions_to_test = {
         "Euclidean Distance": dist.euclidean_distance,
         "L1 Distance": dist.l1_distance,
@@ -60,10 +73,12 @@ def run_evaluation(database, queries, ground_truth, descriptor_maker, top_k, csv
         "Jensen Shannon Divergence": dist.jensen_shannon_divergence
     }
 
+    # Get number of channels from color space.
     color_space_channels = {'GRAY': 1, 'HSV': 3, 'RGB': 3, 'LAB': 3, 'YCRCB': 3, 'HLS': 3}
     num_channels = color_space_channels[descriptor_maker.color_space.upper()]
     bins_per_channel = descriptor_maker.bins_per_channel
 
+    # Add Earth Mover's Distance with appropriate parameters.
     distance_functions_to_test["Earth Mover's Distance"] = partial(
         dist.emd_multichannel,
         num_channels=num_channels,
@@ -71,31 +86,37 @@ def run_evaluation(database, queries, ground_truth, descriptor_maker, top_k, csv
     )
 
     print(f"\nEvaluating with bin_per_channel={bins_per_channel} and color_space={descriptor_maker.color_space}...")
+    # Evaluate all provided distance functions.
     for dist_name, dist_func in distance_functions_to_test.items():
         average_precisions = []
         for i, query in enumerate(queries):
+            # Get top k closest images for the given query.
             closest_k = find_closest(query, database, dist_func, k=top_k)
+            # Determine predicted indices from file names.
             predicted_indices = [int(os.path.splitext(entry['name'])[0].split('_')[-1]) for entry in closest_k]
 
             gt_indices = ground_truth[i]
+            # Make sure ground truth is in list form.
             if not isinstance(gt_indices, list):
                 gt_indices = [gt_indices]
 
+            # Compute average precision for this query.
             ap = calculate_average_precision(gt_indices, predicted_indices)
             average_precisions.append(ap)
 
         mean_ap = np.mean(average_precisions)
         print(f"  Result for {dist_name}:")
         print(f"    Mean Average Precision (mAP) @{top_k}: {mean_ap:.4f}")
-        
+        # Write results into CSV.
         csv_writer.writerow([descriptor_maker.color_space, bins_per_channel, dist_name, f"{mean_ap:.4f}"])
 
+# Generates various performance plots from the results file.
 def create_plots(results_file, top_k):
-
     print("\nGenerating plots from results...")
     df = pd.read_csv(results_file)
     map_column = f"mAP@{top_k}"
 
+    # Plot top 15 performing combinations.
     df_sorted = df.sort_values(by=map_column, ascending=False).head(15)
     df_sorted['Combination'] = df_sorted['Color Space'] + " " + \
                                df_sorted['Bins per Channel'].astype(str) + " " + \
@@ -112,10 +133,12 @@ def create_plots(results_file, top_k):
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 12))
     
+    # Plot average performance by distance function.
     avg_dist = df.groupby('Distance Function')[map_column].mean().sort_values(ascending=False).reset_index()
     sns.barplot(ax=axes[0], x=map_column, y='Distance Function', data=avg_dist, palette='plasma')
     axes[0].set_title('Average Performance by Distance Function')
     
+    # Plot average performance by color space.
     avg_color = df.groupby('Color Space')[map_column].mean().sort_values(ascending=False).reset_index()
     sns.barplot(ax=axes[1], x=map_column, y='Color Space', data=avg_color, palette='magma')
     axes[1].set_title('Average Performance by Color Space')
@@ -124,6 +147,7 @@ def create_plots(results_file, top_k):
     plt.savefig('average_performance.png')
     print("Saved average_performance.png")
 
+    # Plot heatmaps for each distance function.
     distance_functions = df['Distance Function'].unique()
     num_dist = len(distance_functions)
     fig, axes = plt.subplots(int(np.ceil(num_dist / 2)), 2, figsize=(15, 4 * np.ceil(num_dist / 2)))
@@ -143,6 +167,7 @@ def create_plots(results_file, top_k):
     print("Saved heatmap_by_distance_function.png")
     plt.close('all')
 
+# Main function to parse arguments and initiate evaluation.
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset_path", type=str)
@@ -154,9 +179,11 @@ def main():
     parser.add_argument("--output_file", type=str, default="results1.csv", help="Path to save the results CSV file")
     args = parser.parse_args()
 
+    # Load the database and queries.
     database = load_database(args.dataset_path)
     queries = load_queries(args.queries_path)
 
+    # Load ground truth from pickle file.
     gt_path = os.path.join(args.queries_path, "gt_corresps.pkl")
     try:
         with open(gt_path, 'rb') as f:
@@ -167,9 +194,11 @@ def main():
 
     with open(args.output_file, 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
+        # Write CSV header.
         csv_writer.writerow(["Color Space", "Bins per Channel", "Distance Function", f"mAP@{args.top_k}"])
 
         if args.test:
+            # Test multiple combinations of bins and color spaces.
             bins_per_channel_to_test = [16, 32, 64, 128, 255]
             color_spaces_to_test = ["GRAY", "HSV", "RGB", "LAB", "YCRCB", "HLS"]
 
@@ -178,12 +207,15 @@ def main():
                     descriptor_maker = ImageDescriptor(color_space=cs, bins_per_channel=bins, normalize_histograms=True)
                     run_evaluation(database, queries, ground_truth, descriptor_maker, args.top_k, csv_writer)
         else:
+            # Evaluate with a single provided configuration.
             descriptor_maker = ImageDescriptor(color_space=args.color_space, bins_per_channel=args.bins_per_channel, normalize_histograms=True)
             run_evaluation(database, queries, ground_truth, descriptor_maker, args.top_k, csv_writer)
 
     print(f"\nResults saved to {args.output_file}")
     
+    # Generate and save plots.
     create_plots(args.output_file, args.top_k)
 
+# Entry point of the script.
 if __name__ == "__main__":
     main()

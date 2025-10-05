@@ -229,7 +229,9 @@ class WeightStrategy(enum.Enum):
     # CUADRATIC_PYRAMID = 'CUADRATIC_PYRAMID'
     # CONE = 'CONE'
     # CUADRATIC_CONE = 'CUADRATIC_CONE'
+    CENTER_CROP_05 = 'CENTER_CROP_05'
     CENTER_CROP_10 = 'CENTER_CROP_10'
+    CENTER_CROP_15 = 'CENTER_CROP_15'
     # CENTER_CROP_20 = 'CENTER_CROP_20'
 
 class ImageDescriptorMaker:
@@ -293,8 +295,12 @@ class ImageDescriptorMaker:
             #     return create_cone_weight(image.shape[0], image.shape[1])
             # case WeightStrategy.CUADRATIC_CONE:
             #     return create_cuadratic_cone_weight(image.shape[0], image.shape[1])
+            case WeightStrategy.CENTER_CROP_05:
+                return create_center_crop_weight(image.shape[0], image.shape[1], 0.05)
             case WeightStrategy.CENTER_CROP_10:
                 return create_center_crop_weight(image.shape[0], image.shape[1], 0.1)
+            case WeightStrategy.CENTER_CROP_15:
+                return create_center_crop_weight(image.shape[0], image.shape[1], 0.15)
             # case WeightStrategy.CENTER_CROP_20:
             #     return create_center_crop_weight(image.shape[0], image.shape[1], 0.2)
             case _:

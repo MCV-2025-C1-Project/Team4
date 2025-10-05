@@ -2,12 +2,13 @@ import itertools
 from typing import Iterator
 import cv2
 
-from descriptor import ColorSpace, WeightStrategy
+from libs_week1.descriptor import ColorSpace, WeightStrategy
 
 
 def generate_gamma_corrections():
-    return [0.8, 1.0, 1.5]
-    return [0.5, 0.8, 1.0, 1.2, 1.5, 2.0]
+    return [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1] # second search
+    return [0.8, 1.0, 1.5] # first search (1.5 performs badly)
+    return [0.5, 0.8, 1.0, 1.2, 1.5, 2.0] # hmmmmm
 
 
 def generate_blur_functions():
@@ -59,7 +60,8 @@ def generate_color_space_combinations():
     return combinations
 
 def generate_color_space_combinations():
-    all_spaces = list(ColorSpace)
+    all_spaces = list(ColorSpace) # first search
+    all_spaces = [ColorSpace.RGB, ColorSpace.LAB, ColorSpace.YCRCB] # second search
     combinations = []
     
     for space in all_spaces:
@@ -67,10 +69,10 @@ def generate_color_space_combinations():
     
     rgb_pairs = [
         # ColorSpace.GRAY,    # Luminance info
-        ColorSpace.HSV,     # Hue/saturation info
+        # ColorSpace.HSV,     # Hue/saturation info # first search
         ColorSpace.LAB,     # Perceptual color
         ColorSpace.YCRCB,   # Luma/chroma separation
-        ColorSpace.HLS,     # Alternative hue representation
+        # ColorSpace.HLS,     # Alternative hue representation # first search
     ]
     
     for other_space in rgb_pairs:
@@ -149,12 +151,14 @@ def generate_keep_discard_patterns(color_spaces: list[ColorSpace]):
 
 
 def generate_bins():
-    return [4, 8, 16, 32, 64]
+    return [8, 12, 16, 24, 32, 48, 64] # second search
+    return [4, 8, 16, 32, 64] # first search
     return [4, 8, 16, 32, 64, 128]
 
 
 def generate_weights():
-    return [None] + list(WeightStrategy)
+    return [WeightStrategy.CENTER_CROP_05, WeightStrategy.CENTER_CROP_10, WeightStrategy.CENTER_CROP_15, WeightStrategy.PYRAMID]
+    return [None] + list(WeightStrategy) # first search
 
 
 def hyperparameter_grid_search() -> Iterator[dict]:
@@ -214,6 +218,7 @@ def actual_grid_size():
     for _ in hyperparameter_grid_search():
         total += 1
     return total
+
 if __name__ == '__main__':
     print(estimate_grid_size())
     print(actual_grid_size())

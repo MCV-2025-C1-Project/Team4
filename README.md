@@ -97,3 +97,65 @@ python query_by_sample_dist_comparison.py ./data/BBDD ./data/qsd1_w1 --top_k 5 -
 **Purpose:**
 - The `descriptor.py` script is responsible for computing image descriptors from input images.
 - It leverages a specified color space (e.g., GRAY, RGB, LAB, YCbCr, etc.) and computes 1D histograms per channel to form a complete descriptor for each image.
+
+## 5. `query_descriptor_grid_search.py`
+
+**Purpose:**
+This script automates a **hyperparameter grid search** over different image descriptor configurations and evaluates multiple distance metrics for image retrieval performance. For each combination of descriptor settings (e.g., color spaces, bins, weighting, gamma correction), it computes descriptors for the database, performs queries on a set of test images, calculates `MAP@1` and `MAP@5`, and saves the results as JSON files.
+
+**Key Components:**
+
+* **`ImageDatabase`** – Loads and stores dataset images, manages descriptor computation, and performs distance-based queries.
+* **`ImageDescriptorMaker`** – Generates image descriptors based on configurable parameters (color spaces, histogram bins, weighting, etc.).
+* **`hyperparameter_grid_search()`** – Yields combinations of descriptor hyperparameters to be evaluated.
+* **`mapk()`** – Computes the mean average precision at `k` (for `k=1` and `k=5`).
+* **Multiple distance metrics** – Each configuration is tested with several distance functions (L1, Chi-Squared, Intersection, Hellinger, etc.), plus special multichannel distances such as **Earth Mover’s Distance (EMD)** and **Multichannel Quadratic Form Distance**.
+* **Result logging** – Each configuration’s results (descriptor settings, distance type, MAP@1, MAP@5) are stored in JSON files.
+
+**Usage:**
+
+```bash
+python query_descriptor_grid_search.py database_path queries_path --results_folder PATH [--from_iter N] [--every M]
+```
+
+### Parameters
+
+* `database_path`
+  Path to the image database file (used with `ImageDatabase.load`). **(Required, positional argument)**
+* `queries_path`
+  Path to the query images directory containing `.jpg` files and a `gt_corresps.pkl` file. **(Required, positional argument)**
+
+  * The directory must include:
+
+    * `gt_corresps.pkl`: ground truth correspondences (used by `mapk()`).
+    * Query images (`.jpg`): filenames are used to extract query IDs.
+* `--results_folder`
+  Output folder to store JSON files with results for each iteration. **(Required)**
+* `--from_iter`
+  Index of the first hyperparameter combination to process. Use this to resume from a given point. Default: `0`.
+* `--every`
+  Process and save results every `M` iterations (e.g., `--every 2` evaluates every second configuration). Default: `1`.
+
+
+### Workflow Summary
+
+1. **Load database** using `ImageDatabase.load(database_path)`.
+2. **Load queries** and ground truth from the provided directory (`gt_corresps.pkl` + `.jpg` images).
+3. **Iterate through hyperparameter combinations** from `hyperparameter_grid_search()`.
+4. For each combination:
+
+   * Initialize an `ImageDescriptorMaker` with the current parameters.
+   * Compute descriptors for all database images.
+   * For each distance metric:
+
+     * Compute query descriptors.
+     * Retrieve top-5 closest matches for each query.
+     * Calculate `MAP@1` and `MAP@5`.
+   * Append results to a structured list.
+   * Save results as a JSON file in `--results_folder`.
+
+### Example
+
+```bash
+python query_descriptor_grid_search.py ./data/BBDD ./data/qsd1_w1 --results_folder results/grid_search --from_iter 0 --every 1
+```
