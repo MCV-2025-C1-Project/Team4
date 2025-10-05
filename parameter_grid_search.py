@@ -2,16 +2,16 @@ import argparse
 import os
 from typing import Any
 import cv2
-from average_precision import mapk
-from database import ImageDatabase
-from descriptor import ImageDescriptor, ImageDescriptorMaker
-import distances
+from libs_week1.average_precision import mapk
+from libs_week1.database import ImageDatabase
+from libs_week1.descriptor import ImageDescriptor, ImageDescriptorMaker
+import libs_week1.distances
 from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle
 import json
 
-from hyperparameter_combinations import hyperparameter_grid_search
+from libs_week1.hyperparameter_combinations import hyperparameter_grid_search
 
 def parse_arguments():
     parser = argparse.ArgumentParser()

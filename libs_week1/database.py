@@ -4,7 +4,7 @@ from typing import Callable, Self
 import cv2
 import numpy as np
 
-from descriptor import ImageDescriptorMaker
+from libs_week1.descriptor import ImageDescriptorMaker
 
 
 class Image:

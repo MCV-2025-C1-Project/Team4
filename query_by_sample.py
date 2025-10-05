@@ -1,11 +1,11 @@
 import argparse
 import os
 from typing import Any
-from average_precision import mapk
+from libs_week1.average_precision import mapk
 import cv2
-from database import ImageDatabase
-from descriptor import ColorSpace, ImageDescriptor, ImageDescriptorMaker, WeightStrategy
-import distances
+from libs_week1.database import ImageDatabase
+from libs_week1.descriptor import ColorSpace, ImageDescriptor, ImageDescriptorMaker, WeightStrategy
+import libs_week1.distances
 from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle

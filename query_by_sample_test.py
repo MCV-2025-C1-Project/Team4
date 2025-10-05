@@ -2,8 +2,8 @@ import argparse
 import os
 from typing import Any
 import cv2
-from descriptor import ImageDescriptor
-from distances import euclidean_distance
+from libs_week1.descriptor import ImageDescriptor
+from libs_week1.distances import euclidean_distance
 from matplotlib import pyplot as plt
 
 def parse_arguments():

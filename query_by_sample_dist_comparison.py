@@ -6,8 +6,8 @@ import numpy as np
 import pickle
 from functools import partial
 import csv
-from descriptor import ImageDescriptor
-import distances as dist
+from libs_week1.descriptor import ImageDescriptor
+import libs_week1.distances as dist
 from query_by_sample import load_database, load_queries
 import pandas as pd
 import matplotlib.pyplot as plt

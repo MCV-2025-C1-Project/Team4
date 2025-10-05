@@ -2,7 +2,7 @@ import itertools
 from typing import Iterator
 import cv2
 
-from descriptor import ColorSpace, WeightStrategy
+from libs_week1.descriptor import ColorSpace, WeightStrategy
 
 
 def generate_gamma_corrections():
