@@ -1,51 +1,59 @@
 import argparse
 import os
 from typing import Any
+from average_precision import mapk
 import cv2
-from descriptor import ImageDescriptor
+from database import ImageDatabase
+from descriptor import ColorSpace, ImageDescriptor, ImageDescriptorMaker, WeightStrategy
 import distances
 from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle
 
+def parse_colorspace(string: str):
+    try:
+        return ColorSpace(string.upper())
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid color space: {string}.")
+
+def parse_weightstrategy(string: str):
+    try:
+        return WeightStrategy(string.upper())
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid color space: {string}.")
+
+def parse_distance(string: str):
+    for name, distance in distances.iter_simple_distances():
+        if name == string:
+            return distance
+        
+    raise argparse.ArgumentTypeError(f"Invalid distance: {string}.")
+    
+
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset_path", type=str)
     parser.add_argument("queries_path", type=str)
+    
+    parser.add_argument("--gamma", type=float, default=0.8)
+    parser.add_argument("--color_spaces", type=parse_colorspace, nargs='+', default=[ColorSpace.LAB])
+    parser.add_argument("--keep_or_discard", type=str, default='KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK') # so it uses all channels by default
+    parser.add_argument("--weight_strategy", type=parse_weightstrategy, default=WeightStrategy.CENTER_CROP_15)
+    parser.add_argument("--bins", type=int, default=32)
+    parser.add_argument("--distance", type=parse_distance, default=distances.canberra_distance)
+    parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--pkl_output_path", type=str, default=None)
 
     return parser.parse_args()
 
 
-def load_database(database_path: str):
-    database: list[dict[str, Any]] = []
-    for filename in sorted(os.listdir(database_path)):
-        if not filename.endswith(".jpg"):
-            continue
-
-        image_path = os.path.join(database_path, filename)
-        image = cv2.imread(image_path)
-        if image is None:
-            raise ValueError(f"Could not read image {filename}.")
-        
-        painting_name_path = Path(image_path).with_suffix('.txt')
-        try:
-            painting_name = painting_name_path.read_text(encoding="utf-8")
-        except Exception as e:
-            print(f"Image {filename} doesn't have associated .txt file.")
-            painting_name = None
-
-        database.append({
-            'name': filename,
-            'image': image,
-            'painting_name': painting_name
-        })
-
-    return database
-
-
 def load_queries(queries_path: str):
     queries = []
-    gt = pickle.load(open(os.path.join(queries_path, "gt_corresps.pkl"), 'rb'))
+    gt_path = os.path.join(queries_path, "gt_corresps.pkl")
+    if gt_path:
+        gt = pickle.load(open(gt_path, 'rb'))
+    else:
+        gt = None
     for filename in sorted(os.listdir(queries_path)):
         if not filename.endswith(".jpg"):
             continue
@@ -56,40 +64,10 @@ def load_queries(queries_path: str):
         queries.append({
             'image': image,
             'name': filename,
-            'gt': int(Path(image_path).stem)
+            'id': int(Path(image_path).stem)
         })
 
-    return queries
-
-
-
-def add_descriptors_to_dataset(dataset: list[dict[str, Any]]):
-    descriptor_maker = ImageDescriptor(normalize_histograms=True)
-    for entry in dataset:
-        entry['descriptor'] = descriptor_maker.compute_descriptor(entry['image'])
-
-
-# El nombre es una mierda
-def split_query_and_dataset(dataset: list[dict[str, Any]], query_name: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    query = None
-    new_dataset = []
-    for entry in dataset:
-        if entry['name'] == query_name:
-            query = entry
-        else:
-            new_dataset.append(entry)
-    
-    assert query is not None
-    assert len(dataset) == (len(new_dataset) + 1)
-    return query, new_dataset
-
-
-def find_k_closests(query: dict[str, Any], dataset: list[dict[str, Any]], k=2):
-    for entry in dataset:
-        distance = distances.l1_distance(entry['descriptor'], query['descriptor'])
-        entry['distance'] = distance
-
-    return list(sorted(dataset, key=lambda e: e['distance']))[:k]
+    return queries, gt
 
 
 def show_results(query, results):
@@ -100,7 +78,7 @@ def show_results(query, results):
 
     for i, entry in enumerate(results, start=1):
         plt.figure()
-        plt.title(f'Top {i}, distance = {entry["distance"]:.5f}')
+        plt.title(f'Top {i}')
         plt.imshow(cv2.cvtColor(entry['image'], cv2.COLOR_BGR2RGB))
         plt.show()
 
@@ -108,20 +86,45 @@ def show_results(query, results):
 def main():
     args = parse_arguments()
 
-    print("Loading dataset..")
-    database = load_database(args.dataset_path)
-    queries = load_queries(args.queries_path)
+    print("Loading database..")
+    database = ImageDatabase.load(args.dataset_path)
+    print("Loading queries..")
+    queries, ground_truth = load_queries(args.queries_path)
     print("Computing descriptors..")
-    add_descriptors_to_dataset(database)
-    add_descriptors_to_dataset(queries)
+    descriptor_maker = ImageDescriptorMaker(
+        blur_image=False,
+        gamma_correction=args.gamma,
+        color_spaces=args.color_spaces,
+        keep_or_discard=args.keep_or_discard,
+        weights=args.weight_strategy,
+        bins=args.bins,
+    )
+    database.reset_descriptors_and_distances()
+    database.compute_descriptors(descriptor_maker)
 
+    print("Querying...")
+    results = []
     for query in queries:
-        print("Querying...")
-        closest_k = find_k_closests(query, database, k=1)
-        print("Showing...")
-        show_results(query, closest_k)
-
-
+        query_descriptor = descriptor_maker.make_descriptor(query['image'])
+        top_k = database.query(query_descriptor, args.distance, k=args.k)
+        results.append(top_k)
+        
+    if ground_truth is not None:
+        print("Ground truth is present: evaluating...")
+        clean_results = [[image.id for image in top_k] for top_k in results]
+        mapk1 = mapk(ground_truth, clean_results, k=1)
+        print(f"map@k=1 is {mapk1:.5f}")
+        if args.k >= 5:
+            mapk5 = mapk(ground_truth, clean_results, k=5)
+            print(f"map@k=5 is {mapk5:.5f}")
+    
+    # generate pkl with predictions
+    if args.pkl_output_path:
+        print("Dumping predictions pkl...")
+        clean_results = [[image.id for image in top_k] for top_k in results]
+        queries_indexes = [query['id'] for query in queries]
+        pkl_content = [queries_indexes, clean_results]
+        pickle.dump(pkl_content, open(args.pkl_output_path, "wb"))
 
 
 if __name__ == "__main__":
