@@ -9,6 +9,7 @@ import distances
 from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle
+import json
 
 from hyperparameter_combinations import hyperparameter_grid_search
 
@@ -16,6 +17,9 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument("database_path", type=str)
     parser.add_argument("queries_path", type=str)
+    parser.add_argument("--from_iter", type=int, default=0)
+    parser.add_argument("--every", type=int, default=1)
+    parser.add_argument("--results_folder", type=str, required=True)
 
     return parser.parse_args()
 
@@ -82,9 +86,21 @@ def show_results(query, results):
         plt.show()
 
 
+def save_results_for_descriptor(folder: str, iteration: int, results: list[dict]):
+    os.makedirs(folder, exist_ok=True)
+
+    filename = f"{iteration:05d}.json"
+    filepath = os.path.join(folder, filename)
+
+    with open(filepath, 'w') as f:
+        json.dump(results, f, indent=4)
+
 
 def main():
     args = parse_arguments()
+    from_iter = args.from_iter
+    every = args.every
+    results_folder = args.results_folder
 
     print("Loading database..")
     database = ImageDatabase.load(args.database_path)
@@ -92,8 +108,13 @@ def main():
     print("Loading queries..")
     queries, ground_truth = load_queries(args.queries_path)
 
-    for params in hyperparameter_grid_search():
-        
+    for i, params in enumerate(hyperparameter_grid_search()):
+        if i < from_iter:
+            continue
+
+        if (i - from_iter) % every != 0:
+            continue
+
         descriptor_maker = ImageDescriptorMaker(
             gamma_correction=params['gamma_correction'],
             blur_image=False,
@@ -106,6 +127,7 @@ def main():
         database.reset_descriptors_and_distances()
         database.compute_descriptors(descriptor_maker)
 
+        results_for_descriptor = []
         for distance_name, distance in distances.iter_simple_distances():
             print("Querying...", params, distance_name)
             results_top_5 = []
@@ -119,6 +141,18 @@ def main():
             
             print(params, distance_name, map1, map5)
 
+            results_for_descriptor.append({
+                'gamma_correction': params['gamma_correction'],
+                'blur_image': False,
+                'color_spaces': [space.value for space in params['color_spaces']],
+                'bins': params['bins'],
+                'keep_or_discard': params['keep_or_discard'],
+                'weights': params['weight'].value if params['weight'] is not None else None,
+                'distance': distance_name,
+                'map@k1': map1,
+                'map@k5': map5,
+            })
+
         # special case
         print("Querying...", params, "emd_distance")
         results_top_5 = []
@@ -131,6 +165,45 @@ def main():
         map1 = mapk(ground_truth, results_top_5, k=1)
         
         print(params, "emd_distance", map1, map5)
+
+        results_for_descriptor.append({
+            'gamma_correction': params['gamma_correction'],
+            'blur_image': False,
+            'color_spaces': [space.value for space in params['color_spaces']],
+            'bins': params['bins'],
+            'keep_or_discard': params['keep_or_discard'],
+            'weights': params['weight'].value if params['weight'] is not None else None,
+            'distance': "emd_distance",
+            'map@k1': map1,
+            'map@k5': map5,
+        })
+
+        # special case
+        print("Querying...", params, "multichannel_quadratic_form_distance")
+        results_top_5 = []
+        for image in queries:
+            query_descriptor = descriptor_maker.make_descriptor(image['image'])
+            top_5 = database.query(query_descriptor, lambda h1, h2: distances.multichannel_quadratic_form_distance(h1, h2, num_channels=int(query_descriptor.shape[0] / params['bins']), bins_per_channel=params['bins']), k=5)
+            results_top_5.append([im.id for im in top_5])
+
+        map5 = mapk(ground_truth, results_top_5, k=5)
+        map1 = mapk(ground_truth, results_top_5, k=1)
+        
+        print(params, "multichannel_quadratic_form_distance", map1, map5)
+
+        results_for_descriptor.append({
+            'gamma_correction': params['gamma_correction'],
+            'blur_image': False,
+            'color_spaces': [space.value for space in params['color_spaces']],
+            'bins': params['bins'],
+            'keep_or_discard': params['keep_or_discard'],
+            'weights': params['weight'].value if params['weight'] is not None else None,
+            'distance': "multichannel_quadratic_form_distance",
+            'map@k1': map1,
+            'map@k5': map5,
+        })
+
+        save_results_for_descriptor(results_folder, i, results_for_descriptor)
 
 
 if __name__ == "__main__":

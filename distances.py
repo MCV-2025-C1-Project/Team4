@@ -65,6 +65,19 @@ def hist_intersection(h1: np.ndarray, h2: np.ndarray) -> float:
     return np.sum(np.minimum(h1, h2))
 
 
+def bhattacharyya_similarity(h1: np.ndarray, h2: np.ndarray) -> float:
+    """
+    Compute the Bhattacharyya similarity between two histograms.
+
+    Parameters:
+        h1 (np.ndarray): First histogram.
+        h2 (np.ndarray): Second histogram.
+
+    Returns:
+        float: Hellinger similarity score.
+    """
+    return np.sum(np.sqrt(h1 * h2))
+
 def hellinger_similarity(h1: np.ndarray, h2: np.ndarray) -> float:
     """
     Compute the Hellinger similarity between two histograms.
@@ -76,7 +89,7 @@ def hellinger_similarity(h1: np.ndarray, h2: np.ndarray) -> float:
     Returns:
         float: Hellinger similarity score.
     """
-    return np.sum(np.sqrt(h1 * h2))
+    return np.sqrt(np.sum((np.sqrt(h1) - np.sqrt(h2)) ** 2)) / np.sqrt(2)
 
 
 def kl_divergence(h1: np.ndarray, h2: np.ndarray) -> float:
@@ -160,6 +173,38 @@ def quadratic_form_distance(h1: np.ndarray, h2: np.ndarray) -> float:
     diff = h1 - h2
     return np.sqrt(diff.T @ A @ diff)
 
+def simple_quadratic_form_distance(h1: np.ndarray, h2: np.ndarray, sigma: float = 1.0):
+    num_bins = len(h1)
+    indices = np.arange(num_bins)
+    
+    bin_distances = np.abs(indices[:, np.newaxis] - indices[np.newaxis, :])
+    A = np.exp(-(bin_distances ** 2) / (2 * sigma ** 2))
+    
+    diff = h1 - h2
+    return np.sqrt(diff.T @ A @ diff)
+
+
+def multichannel_quadratic_form_distance(
+        h1: np.ndarray, h2: np.ndarray, 
+        num_channels: int, 
+        bins_per_channel: int,
+        sigma: float = 1.0,
+    ) -> float:
+
+    indices = np.arange(bins_per_channel)
+    bin_distances = np.abs(indices[:, np.newaxis] - indices[np.newaxis, :])
+    A_channel = np.exp(-(bin_distances ** 2) / (2 * sigma ** 2))
+    
+    h1_channels = h1.reshape(num_channels, bins_per_channel)
+    h2_channels = h2.reshape(num_channels, bins_per_channel)
+    
+    total_distance_squared = 0.0
+    for i in range(num_channels):
+        diff = h1_channels[i] - h2_channels[i]
+        total_distance_squared += diff.T @ A_channel @ diff
+    
+    return np.sqrt(total_distance_squared)
+
 
 def emd(a: list[float], b: list[float]) -> float:
     """
@@ -230,10 +275,11 @@ def iter_simple_distances():
         ("l1_distance", l1_distance),
         ("x2_distance", x2_distance),
         ("hist_intersection", hist_intersection),
+        ("bhattacharyya_similarity", bhattacharyya_similarity),
         ("hellinger_similarity", hellinger_similarity),
         ("kl_divergence", kl_divergence),
         ("jensen_shannon_divergence", jensen_shannon_divergence),
-        ("quadratic_form_distance", quadratic_form_distance),
+        ("simple_quadratic_form_distance", simple_quadratic_form_distance),
     ]
 
 
