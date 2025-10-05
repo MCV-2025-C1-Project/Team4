@@ -157,5 +157,5 @@ python query_descriptor_grid_search.py database_path queries_path --results_fold
 ### Example
 
 ```bash
-python query_descriptor_grid_search.py ./data/BBDD.pkl ./data/qsd1_w1 --results_folder results/grid_search --from_iter 0 --every 1
+python query_descriptor_grid_search.py ./data/BBDD ./data/qsd1_w1 --results_folder results/grid_search --from_iter 0 --every 1
 ```
