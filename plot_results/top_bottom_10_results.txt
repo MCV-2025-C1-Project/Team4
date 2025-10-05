@@ -1,0 +1,212 @@
+====================================================================================================
+TOP 10 CONFIGURATIONS (sorted by MAP@K5)
+====================================================================================================
+
+#1 - MAP@K5: 0.8650
+   Color Spaces: LAB
+   Bins: 32
+   Weight Strategy: CENTER_CROP_15
+   Distance: canberra_distance
+   Gamma: 0.8, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.8333, mAP@k5: 0.8650
+
+#2 - MAP@K5: 0.8583
+   Color Spaces: LAB
+   Bins: 32
+   Weight Strategy: CENTER_CROP_15
+   Distance: canberra_distance
+   Gamma: 0.9, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.8333, mAP@k5: 0.8583
+
+#3 - MAP@K5: 0.8556
+   Color Spaces: LAB
+   Bins: 24
+   Weight Strategy: CENTER_CROP_15
+   Distance: canberra_distance
+   Gamma: 0.9, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.8000, mAP@k5: 0.8556
+
+#4 - MAP@K5: 0.8556
+   Color Spaces: LAB
+   Bins: 24
+   Weight Strategy: CENTER_CROP_15
+   Distance: canberra_distance
+   Gamma: 0.8, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.8333, mAP@k5: 0.8556
+
+#5 - MAP@K5: 0.8528
+   Color Spaces: LAB
+   Bins: 16
+   Weight Strategy: CENTER_CROP_15
+   Distance: canberra_distance
+   Gamma: 0.8, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.8333, mAP@k5: 0.8528
+
+#6 - MAP@K5: 0.8511
+   Color Spaces: LAB
+   Bins: 48
+   Weight Strategy: CENTER_CROP_15
+   Distance: canberra_distance
+   Gamma: 0.7, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.8333, mAP@k5: 0.8511
+
+#7 - MAP@K5: 0.8500
+   Color Spaces: LAB
+   Bins: 64
+   Weight Strategy: CENTER_CROP_15
+   Distance: canberra_distance
+   Gamma: 0.9, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.8333, mAP@k5: 0.8500
+
+#8 - MAP@K5: 0.8444
+   Color Spaces: LAB
+   Bins: 48
+   Weight Strategy: CENTER_CROP_15
+   Distance: canberra_distance
+   Gamma: 0.9, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.8000, mAP@k5: 0.8444
+
+#9 - MAP@K5: 0.8400
+   Color Spaces: LAB
+   Bins: 8
+   Weight Strategy: CENTER_CROP_15
+   Distance: canberra_distance
+   Gamma: 0.9, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.8000, mAP@k5: 0.8400
+
+#10 - MAP@K5: 0.8361
+   Color Spaces: LAB
+   Bins: 64
+   Weight Strategy: CENTER_CROP_15
+   Distance: canberra_distance
+   Gamma: 0.8, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.8000, mAP@k5: 0.8361
+
+====================================================================================================
+BOTTOM 10 CONFIGURATIONS (sorted by MAP@K5)
+====================================================================================================
+
+#1 (from bottom) - MAP@K5: 0.1133
+   Color Spaces: YCRCB
+   Bins: 48
+   Weight Strategy: CENTER_CROP_05
+   Distance: euclidean_distance
+   Gamma: 0.5, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.1000, mAP@k5: 0.1133
+
+#2 (from bottom) - MAP@K5: 0.1133
+   Color Spaces: YCRCB
+   Bins: 48
+   Weight Strategy: CENTER_CROP_05
+   Distance: simple_quadratic_form_distance
+   Gamma: 0.5, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.1000, mAP@k5: 0.1133
+
+#3 (from bottom) - MAP@K5: 0.1133
+   Color Spaces: YCRCB
+   Bins: 48
+   Weight Strategy: CENTER_CROP_05
+   Distance: multichannel_quadratic_form_distance
+   Gamma: 0.5, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.1000, mAP@k5: 0.1133
+
+#4 (from bottom) - MAP@K5: 0.1133
+   Color Spaces: YCRCB
+   Bins: 64
+   Weight Strategy: CENTER_CROP_05
+   Distance: euclidean_distance
+   Gamma: 0.5, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.1000, mAP@k5: 0.1133
+
+#5 (from bottom) - MAP@K5: 0.1133
+   Color Spaces: YCRCB
+   Bins: 64
+   Weight Strategy: CENTER_CROP_05
+   Distance: simple_quadratic_form_distance
+   Gamma: 0.5, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.1000, mAP@k5: 0.1133
+
+#6 (from bottom) - MAP@K5: 0.1133
+   Color Spaces: YCRCB
+   Bins: 64
+   Weight Strategy: CENTER_CROP_05
+   Distance: multichannel_quadratic_form_distance
+   Gamma: 0.5, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.1000, mAP@k5: 0.1133
+
+#7 (from bottom) - MAP@K5: 0.1122
+   Color Spaces: YCRCB
+   Bins: 12
+   Weight Strategy: CENTER_CROP_05
+   Distance: euclidean_distance
+   Gamma: 0.5, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.0667, mAP@k5: 0.1122
+
+#8 (from bottom) - MAP@K5: 0.1111
+   Color Spaces: RGB, YCRCB
+   Bins: 48
+   Weight Strategy: CENTER_CROP_05
+   Distance: euclidean_distance
+   Gamma: 0.5, Blur: False
+   Keep/Discard: KKKDKK
+   mAP@k1: 0.1000, mAP@k5: 0.1111
+
+#9 (from bottom) - MAP@K5: 0.1000
+   Color Spaces: YCRCB
+   Bins: 48
+   Weight Strategy: CENTER_CROP_10
+   Distance: euclidean_distance
+   Gamma: 0.5, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.0667, mAP@k5: 0.1000
+
+#10 (from bottom) - MAP@K5: 0.1000
+   Color Spaces: YCRCB
+   Bins: 64
+   Weight Strategy: CENTER_CROP_10
+   Distance: euclidean_distance
+   Gamma: 0.5, Blur: False
+   Keep/Discard: KKK
+   mAP@k1: 0.0667, mAP@k5: 0.1000
+
+====================================================================================================
+
+====================================================================================================
+ANALYSIS OF TOP 10 CONFIGURATIONS
+====================================================================================================
+
+Most common color space combinations:
+  LAB: 10 times
+
+Most common bin sizes:
+  32 bins: 2 times
+  24 bins: 2 times
+  48 bins: 2 times
+  64 bins: 2 times
+  16 bins: 1 times
+  8 bins: 1 times
+
+Most common weight strategies:
+  CENTER_CROP_15: 10 times
+
+Most common distance functions:
+  canberra_distance: 10 times
+
+====================================================================================================

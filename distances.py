@@ -51,6 +51,51 @@ def x2_distance(h1: np.ndarray, h2: np.ndarray) -> float:
     return np.sum((h1 - h2) ** 2 / (h1 + h2 + 1e-10))
 
 
+def canberra_distance(h1: np.ndarray, h2: np.ndarray) -> float:
+    """
+    Canberra Distance between two histograms.
+
+    Parameters:
+        h1 (np.ndarray): First histogram.
+        h2 (np.ndarray): Second histogram.
+
+    Returns:
+        float: The Canberra distance.
+    """
+    epsilon = 1e-10
+    numerator = np.abs(h1 - h2)
+    denominator = np.abs(h1) + np.abs(h2) + epsilon
+    return np.sum(numerator / denominator)
+
+
+def spearman_correlation(h1: np.ndarray, h2: np.ndarray) -> float:
+    """
+    Compute the Spearman rank correlation coefficient between two histograms.
+    
+    Parameters:
+        h1 (np.ndarray): First histogram.
+        h2 (np.ndarray): Second histogram.
+
+    Returns:
+        float: The Spearman correlation coefficient  - higher value means more similar histograms.
+    """
+    # Ranks
+    rank_h1 = scipy.stats.rankdata(h1)
+    rank_h2 = scipy.stats.rankdata(h2)
+    
+    # Compute Pearson correlation of the ranks
+    mean_rank_h1 = np.mean(rank_h1)
+    mean_rank_h2 = np.mean(rank_h2)
+    
+    numerator = np.sum((rank_h1 - mean_rank_h1) * (rank_h2 - mean_rank_h2))
+    denominator = np.sqrt(np.sum((rank_h1 - mean_rank_h1) ** 2) * np.sum((rank_h2 - mean_rank_h2) ** 2))
+    
+    if denominator == 0:
+        return 0.0
+    
+    return numerator / denominator
+
+
 def hist_intersection(h1: np.ndarray, h2: np.ndarray) -> float:
     """
     Compute the histogram intersection between two histograms.
@@ -65,6 +110,19 @@ def hist_intersection(h1: np.ndarray, h2: np.ndarray) -> float:
     return np.sum(np.minimum(h1, h2))
 
 
+def bhattacharyya_similarity(h1: np.ndarray, h2: np.ndarray) -> float:
+    """
+    Compute the Bhattacharyya similarity between two histograms.
+
+    Parameters:
+        h1 (np.ndarray): First histogram.
+        h2 (np.ndarray): Second histogram.
+
+    Returns:
+        float: Hellinger similarity score.
+    """
+    return np.sum(np.sqrt(h1 * h2))
+
 def hellinger_similarity(h1: np.ndarray, h2: np.ndarray) -> float:
     """
     Compute the Hellinger similarity between two histograms.
@@ -76,7 +134,7 @@ def hellinger_similarity(h1: np.ndarray, h2: np.ndarray) -> float:
     Returns:
         float: Hellinger similarity score.
     """
-    return np.sum(np.sqrt(h1 * h2))
+    return np.sqrt(np.sum((np.sqrt(h1) - np.sqrt(h2)) ** 2)) / np.sqrt(2)
 
 
 def kl_divergence(h1: np.ndarray, h2: np.ndarray) -> float:
@@ -126,6 +184,7 @@ def earth_movers_distance(h1: np.ndarray, h2: np.ndarray, bin_locations: np.ndar
     return scipy.stats.wasserstein_distance(bin_locations, bin_locations, h1, h2)
 
 
+
 def get_similarity_matrix(h1: np.ndarray, h2: np.ndarray) -> np.ndarray:
     """
     Compute a similarity matrix between two histograms by taking the minimum per bin pair.
@@ -160,6 +219,38 @@ def quadratic_form_distance(h1: np.ndarray, h2: np.ndarray) -> float:
     diff = h1 - h2
     return np.sqrt(diff.T @ A @ diff)
 
+def simple_quadratic_form_distance(h1: np.ndarray, h2: np.ndarray, sigma: float = 1.0):
+    num_bins = len(h1)
+    indices = np.arange(num_bins)
+    
+    bin_distances = np.abs(indices[:, np.newaxis] - indices[np.newaxis, :])
+    A = np.exp(-(bin_distances ** 2) / (2 * sigma ** 2))
+    
+    diff = h1 - h2
+    return np.sqrt(diff.T @ A @ diff)
+
+
+def multichannel_quadratic_form_distance(
+        h1: np.ndarray, h2: np.ndarray, 
+        num_channels: int, 
+        bins_per_channel: int,
+        sigma: float = 1.0,
+    ) -> float:
+
+    indices = np.arange(bins_per_channel)
+    bin_distances = np.abs(indices[:, np.newaxis] - indices[np.newaxis, :])
+    A_channel = np.exp(-(bin_distances ** 2) / (2 * sigma ** 2))
+    
+    h1_channels = h1.reshape(num_channels, bins_per_channel)
+    h2_channels = h2.reshape(num_channels, bins_per_channel)
+    
+    total_distance_squared = 0.0
+    for i in range(num_channels):
+        diff = h1_channels[i] - h2_channels[i]
+        total_distance_squared += diff.T @ A_channel @ diff
+    
+    return np.sqrt(total_distance_squared)
+
 
 def emd(a: list[float], b: list[float]) -> float:
     """
@@ -176,11 +267,11 @@ def emd(a: list[float], b: list[float]) -> float:
     diff_array = []
     s = len(a)
     for i in range(s):
-        diff_array.appEMD(a[i] - b[i])
+        diff_array.append(a[i] - b[i])
     su = []
     for j in range(s):
         earth += diff_array[j]
-        su.appEMD(abs(earth))
+        su.append(abs(earth))
     return sum(su) / (s - 1) if s > 1 else 0.0
 
 
@@ -229,11 +320,14 @@ def iter_simple_distances():
         ("euclidean_distance", euclidean_distance),
         ("l1_distance", l1_distance),
         ("x2_distance", x2_distance),
+        ("canberra_distance", canberra_distance),
         ("hist_intersection", hist_intersection),
+        ("bhattacharyya_similarity", bhattacharyya_similarity),
         ("hellinger_similarity", hellinger_similarity),
+        ("spearman_correlation", spearman_correlation),
         ("kl_divergence", kl_divergence),
         ("jensen_shannon_divergence", jensen_shannon_divergence),
-        ("quadratic_form_distance", quadratic_form_distance),
+        ("simple_quadratic_form_distance", simple_quadratic_form_distance),
     ]
 
 
