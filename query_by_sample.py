@@ -53,7 +53,7 @@ def parse_arguments():
 def load_queries(queries_path: str):
     queries = []
     gt_path = os.path.join(queries_path, "gt_corresps.pkl")
-    if gt_path:
+    if os.path.exists(gt_path):
         gt = pickle.load(open(gt_path, 'rb'))
     else:
         gt = None
