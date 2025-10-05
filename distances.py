@@ -51,6 +51,51 @@ def x2_distance(h1: np.ndarray, h2: np.ndarray) -> float:
     return np.sum((h1 - h2) ** 2 / (h1 + h2 + 1e-10))
 
 
+def canberra_distance(h1: np.ndarray, h2: np.ndarray) -> float:
+    """
+    Canberra Distance between two histograms.
+
+    Parameters:
+        h1 (np.ndarray): First histogram.
+        h2 (np.ndarray): Second histogram.
+
+    Returns:
+        float: The Canberra distance.
+    """
+    epsilon = 1e-10
+    numerator = np.abs(h1 - h2)
+    denominator = np.abs(h1) + np.abs(h2) + epsilon
+    return np.sum(numerator / denominator)
+
+
+def spearman_correlation(h1: np.ndarray, h2: np.ndarray) -> float:
+    """
+    Compute the Spearman rank correlation coefficient between two histograms.
+    
+    Parameters:
+        h1 (np.ndarray): First histogram.
+        h2 (np.ndarray): Second histogram.
+
+    Returns:
+        float: The Spearman correlation coefficient  - higher value means more similar histograms.
+    """
+    # Ranks
+    rank_h1 = scipy.stats.rankdata(h1)
+    rank_h2 = scipy.stats.rankdata(h2)
+    
+    # Compute Pearson correlation of the ranks
+    mean_rank_h1 = np.mean(rank_h1)
+    mean_rank_h2 = np.mean(rank_h2)
+    
+    numerator = np.sum((rank_h1 - mean_rank_h1) * (rank_h2 - mean_rank_h2))
+    denominator = np.sqrt(np.sum((rank_h1 - mean_rank_h1) ** 2) * np.sum((rank_h2 - mean_rank_h2) ** 2))
+    
+    if denominator == 0:
+        return 0.0
+    
+    return numerator / denominator
+
+
 def hist_intersection(h1: np.ndarray, h2: np.ndarray) -> float:
     """
     Compute the histogram intersection between two histograms.
@@ -137,6 +182,7 @@ def earth_movers_distance(h1: np.ndarray, h2: np.ndarray, bin_locations: np.ndar
         float: The Earth Movers Distance (EMD).
     """
     return scipy.stats.wasserstein_distance(bin_locations, bin_locations, h1, h2)
+
 
 
 def get_similarity_matrix(h1: np.ndarray, h2: np.ndarray) -> np.ndarray:
@@ -274,9 +320,11 @@ def iter_simple_distances():
         ("euclidean_distance", euclidean_distance),
         ("l1_distance", l1_distance),
         ("x2_distance", x2_distance),
+        ("canberra_distance", canberra_distance),
         ("hist_intersection", hist_intersection),
         ("bhattacharyya_similarity", bhattacharyya_similarity),
         ("hellinger_similarity", hellinger_similarity),
+        ("spearman_correlation", spearman_correlation),
         ("kl_divergence", kl_divergence),
         ("jensen_shannon_divergence", jensen_shannon_divergence),
         ("simple_quadratic_form_distance", simple_quadratic_form_distance),
