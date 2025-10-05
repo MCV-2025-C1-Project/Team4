@@ -149,7 +149,7 @@ def generate_keep_discard_patterns(color_spaces: list[ColorSpace]):
 
 
 def generate_bins():
-    return [8, 16, 32, 64]
+    return [4, 8, 16, 32, 64]
     return [4, 8, 16, 32, 64, 128]
 
 
@@ -205,9 +205,15 @@ def estimate_grid_size():
     print("weight_count", weight_count)
 
     estimated_total = (gamma_count * len(color_space_combos) * 
-                      avg_keep_discard * bin_count)
+                      avg_keep_discard * bin_count * weight_count)
     
     return int(estimated_total)
 
+def actual_grid_size():
+    total = 0
+    for _ in hyperparameter_grid_search():
+        total += 1
+    return total
 if __name__ == '__main__':
     print(estimate_grid_size())
+    print(actual_grid_size())

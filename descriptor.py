@@ -17,6 +17,28 @@ def flatten_list(l):
     return res
 
 
+def bgr_to_cmyk(bgr_image):
+    bgr = bgr_image
+    r = bgr[..., 2]
+    g = bgr[..., 1]
+    b = bgr[..., 0]
+    
+    k = 1 - np.maximum.reduce([r, g, b])
+    
+    denom = 1 - k
+    denom[denom == 0] = 1
+    
+    c = (1 - r - k) / denom
+    m = (1 - g - k) / denom
+    y = (1 - b - k) / denom
+    
+    cmyk = np.stack((c, m, y, k), axis=-1)
+    
+    cmyk[np.isnan(cmyk)] = 0
+
+    return cmyk
+
+
 class ImageDescriptor:
     
     ''' Class to compute descriptors using 1D histograms'''
@@ -213,7 +235,7 @@ class WeightStrategy(enum.Enum):
 class ImageDescriptorMaker:
     def __init__(self, *, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, weights: None | WeightStrategy):
         
-        assert keep_or_discard is None or len(color_spaces) == len(keep_or_discard)
+        # assert keep_or_discard is None or len(color_spaces) == len(keep_or_discard)
 
         self.gamma_correction = gamma_correction
         self.blur_image = blur_image
@@ -224,7 +246,7 @@ class ImageDescriptorMaker:
 
 
     def make_descriptor(self, image: np.ndarray) -> np.ndarray:
-
+        image = image.astype(np.float32) / 255
         image = image ** self.gamma_correction
         if self.blur_image:
             image = self.blur_image(image)
@@ -265,16 +287,16 @@ class ImageDescriptorMaker:
         match self.weights:
             case WeightStrategy.PYRAMID:
                 return create_pyramid_weight(image.shape[0], image.shape[1])
-            case WeightStrategy.CUADRATIC_PYRAMID:
-                return create_cuadraticp_pyramid_weight(image.shape[0], image.shape[1])
-            case WeightStrategy.CONE:
-                return create_cone_weight(image.shape[0], image.shape[1])
-            case WeightStrategy.CUADRATIC_CONE:
-                return create_cuadratic_cone_weight(image.shape[0], image.shape[1])
+            # case WeightStrategy.CUADRATIC_PYRAMID:
+            #     return create_cuadraticp_pyramid_weight(image.shape[0], image.shape[1])
+            # case WeightStrategy.CONE:
+            #     return create_cone_weight(image.shape[0], image.shape[1])
+            # case WeightStrategy.CUADRATIC_CONE:
+            #     return create_cuadratic_cone_weight(image.shape[0], image.shape[1])
             case WeightStrategy.CENTER_CROP_10:
                 return create_center_crop_weight(image.shape[0], image.shape[1], 0.1)
-            case WeightStrategy.CENTER_CROP_20:
-                return create_center_crop_weight(image.shape[0], image.shape[1], 0.2)
+            # case WeightStrategy.CENTER_CROP_20:
+            #     return create_center_crop_weight(image.shape[0], image.shape[1], 0.2)
             case _:
                 raise ValueError("Unknown weight strategy.")
 
@@ -282,8 +304,10 @@ class ImageDescriptorMaker:
     def compute_histograms(self, image):
         if self.weights:
             weights = self.compute_weights_image(image)
+            weights_sum = weights.sum()
         else:
             weights = None
+            weights_sum = None
         
         if len(image.shape) == 2:
             image = np.expand_dims(image, 2)
@@ -291,7 +315,10 @@ class ImageDescriptorMaker:
         histograms = []
         for c in range(image.shape[2]):
             hist = np.histogram(image[:, :, c], bins=self.bins, weights=weights)[0]
-            hist /= (image.shape[0] * image.shape[1])
+            if weights is None:
+                hist = hist / (image.shape[0] * image.shape[1])
+            else:
+                hist = hist / weights_sum
             histograms.append(hist)
 
         return histograms
@@ -322,7 +349,7 @@ class ImageDescriptorMaker:
         return self.compute_histograms(image)
 
     def compute_cmyk_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2CMYK)
+        image = bgr_to_cmyk(image)
         return self.compute_histograms(image)
     
     def compute_luv_descriptor(self, image):
