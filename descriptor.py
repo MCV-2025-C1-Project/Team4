@@ -17,6 +17,28 @@ def flatten_list(l):
     return res
 
 
+def bgr_to_cmyk(bgr_image):
+    bgr = bgr_image
+    r = bgr[..., 2]
+    g = bgr[..., 1]
+    b = bgr[..., 0]
+    
+    k = 1 - np.maximum.reduce([r, g, b])
+    
+    denom = 1 - k
+    denom[denom == 0] = 1
+    
+    c = (1 - r - k) / denom
+    m = (1 - g - k) / denom
+    y = (1 - b - k) / denom
+    
+    cmyk = np.stack((c, m, y, k), axis=-1)
+    
+    cmyk[np.isnan(cmyk)] = 0
+
+    return cmyk
+
+
 class ImageDescriptor:
     
     ''' Class to compute descriptors using 1D histograms'''
@@ -327,7 +349,7 @@ class ImageDescriptorMaker:
         return self.compute_histograms(image)
 
     def compute_cmyk_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2CMYK)
+        image = bgr_to_cmyk(image)
         return self.compute_histograms(image)
     
     def compute_luv_descriptor(self, image):
