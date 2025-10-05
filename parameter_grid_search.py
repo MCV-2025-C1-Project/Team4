@@ -13,44 +13,44 @@ import json
 
 from libs_week1.hyperparameter_combinations import hyperparameter_grid_search
 
+
 def parse_arguments():
     parser = argparse.ArgumentParser()
+    # Define required command-line arguments
     parser.add_argument("database_path", type=str)
     parser.add_argument("queries_path", type=str)
     parser.add_argument("--from_iter", type=int, default=0)
     parser.add_argument("--every", type=int, default=1)
     parser.add_argument("--results_folder", type=str, required=True)
-
     return parser.parse_args()
 
 
 def load_queries(queries_path: str):
     queries = []
+    # Load ground truth correspondences
     gt = pickle.load(open(os.path.join(queries_path, "gt_corresps.pkl"), 'rb'))
     for filename in sorted(os.listdir(queries_path)):
         if not filename.endswith(".jpg"):
             continue
-
         image_path = os.path.join(queries_path, filename)
         image = cv2.imread(image_path)
-        
+        # Add each query image with its filename and ground truth id
         queries.append({
             'image': image,
             'name': filename,
             'gt': int(Path(image_path).stem)
         })
-
     return queries, gt
-
 
 
 def add_descriptors_to_dataset(dataset: list[dict[str, Any]]):
     descriptor_maker = ImageDescriptor(normalize_histograms=True)
+    # Compute and add descriptor for each dataset entry
     for entry in dataset:
         entry['descriptor'] = descriptor_maker.compute_descriptor(entry['image'])
 
 
-# El nombre es una mierda
+# Split the dataset into the query image and the rest based on name matching
 def split_query_and_dataset(dataset: list[dict[str, Any]], query_name: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     query = None
     new_dataset = []
@@ -59,7 +59,7 @@ def split_query_and_dataset(dataset: list[dict[str, Any]], query_name: str) -> t
             query = entry
         else:
             new_dataset.append(entry)
-    
+    # Ensure the query was found and the split is valid
     assert query is not None
     assert len(dataset) == (len(new_dataset) + 1)
     return query, new_dataset
@@ -67,18 +67,21 @@ def split_query_and_dataset(dataset: list[dict[str, Any]], query_name: str) -> t
 
 def find_k_closests(query: dict[str, Any], dataset: list[dict[str, Any]], k=2):
     for entry in dataset:
+        # Calculate L1 distance between query and dataset entries
         distance = distances.l1_distance(entry['descriptor'], query['descriptor'])
         entry['distance'] = distance
-
+    # Return the top k entries with smallest distances
     return list(sorted(dataset, key=lambda e: e['distance']))[:k]
 
 
 def show_results(query, results):
     plt.figure()
     plt.title('Query')
+    # Display the query image (converted to RGB)
     plt.imshow(cv2.cvtColor(query['image'], cv2.COLOR_BGR2RGB))
     plt.show()
 
+    # Display each result image with its distance
     for i, entry in enumerate(results, start=1):
         plt.figure()
         plt.title(f'Top {i}, distance = {entry["distance"]:.5f}')
@@ -88,10 +91,9 @@ def show_results(query, results):
 
 def save_results_for_descriptor(folder: str, iteration: int, results: list[dict]):
     os.makedirs(folder, exist_ok=True)
-
     filename = f"{iteration:05d}.json"
     filepath = os.path.join(folder, filename)
-
+    # Save the results in JSON format with indentation
     with open(filepath, 'w') as f:
         json.dump(results, f, indent=4)
 
@@ -108,13 +110,14 @@ def main():
     print("Loading queries..")
     queries, ground_truth = load_queries(args.queries_path)
 
+    # Iterate over hyperparameter settings
     for i, params in enumerate(hyperparameter_grid_search()):
         if i < from_iter:
             continue
-
         if (i - from_iter) % every != 0:
             continue
 
+        # Initialize descriptor maker using current hyperparameters
         descriptor_maker = ImageDescriptorMaker(
             gamma_correction=params['gamma_correction'],
             blur_image=False,
@@ -124,10 +127,12 @@ def main():
             weights=params['weight'],
         )
         print("Computing descriptors...")
+        # Reset and compute descriptors for the current iteration
         database.reset_descriptors_and_distances()
         database.compute_descriptors(descriptor_maker)
 
         results_for_descriptor = []
+        # Evaluate using simple distance functions
         for distance_name, distance in distances.iter_simple_distances():
             print("Querying...", params, distance_name)
             results_top_5 = []
@@ -136,9 +141,9 @@ def main():
                 top_5 = database.query(query_descriptor, distance, k=5)
                 results_top_5.append([im.id for im in top_5])
 
+            # Compute evaluation metrics
             map5 = mapk(ground_truth, results_top_5, k=5)
             map1 = mapk(ground_truth, results_top_5, k=1)
-            
             print(params, distance_name, map1, map5)
 
             results_for_descriptor.append({
@@ -153,7 +158,7 @@ def main():
                 'map@k5': map5,
             })
 
-        # special case
+        # Special case: EMD distance
         print("Querying...", params, "emd_distance")
         results_top_5 = []
         for image in queries:
@@ -163,7 +168,6 @@ def main():
 
         map5 = mapk(ground_truth, results_top_5, k=5)
         map1 = mapk(ground_truth, results_top_5, k=1)
-        
         print(params, "emd_distance", map1, map5)
 
         results_for_descriptor.append({
@@ -178,7 +182,7 @@ def main():
             'map@k5': map5,
         })
 
-        # special case
+        # Special case: Multichannel Quadratic Form distance
         print("Querying...", params, "multichannel_quadratic_form_distance")
         results_top_5 = []
         for image in queries:
@@ -188,7 +192,6 @@ def main():
 
         map5 = mapk(ground_truth, results_top_5, k=5)
         map1 = mapk(ground_truth, results_top_5, k=1)
-        
         print(params, "multichannel_quadratic_form_distance", map1, map5)
 
         results_for_descriptor.append({
@@ -203,6 +206,7 @@ def main():
             'map@k5': map5,
         })
 
+        # Save results for the current hyperparameter configuration
         save_results_for_descriptor(results_folder, i, results_for_descriptor)
 
 
