@@ -2,6 +2,7 @@ import argparse
 import os
 from typing import Any
 import cv2
+from average_precision import mapk
 from database import ImageDatabase
 from descriptor import ImageDescriptor, ImageDescriptorMaker
 import distances
@@ -85,38 +86,51 @@ def show_results(query, results):
 def main():
     args = parse_arguments()
 
-    print("Loading dataset..")
+    print("Loading database..")
     database = ImageDatabase.load(args.database_path)
+
+    print("Loading queries..")
     queries, ground_truth = load_queries(args.queries_path)
 
     for params in hyperparameter_grid_search():
-        descriptor_maker = ImageDescriptorMaker(params['gamma_correction'])
+        
+        descriptor_maker = ImageDescriptorMaker(
+            gamma_correction=params['gamma_correction'],
+            blur_image=False,
+            color_spaces=params['color_spaces'],
+            bins=params['bins'],
+            keep_or_discard=params['keep_or_discard'],
+            weights=params['weight'],
+        )
+        print("Computing descriptors...")
         database.reset_descriptors_and_distances()
         database.compute_descriptors(descriptor_maker)
 
-        for distance in distances.iter_simple_distances():
+        for distance_name, distance in distances.iter_simple_distances():
+            print("Querying...", params, distance_name)
             results_top_5 = []
-            for image in query:
-                query_descriptor = descriptor_maker.make_descriptor(image)
+            for image in queries:
+                query_descriptor = descriptor_maker.make_descriptor(image['image'])
                 top_5 = database.query(query_descriptor, distance, k=5)
-                results_top_5.append(top_5)
+                results_top_5.append([im.id for im in top_5])
 
+            map5 = mapk(ground_truth, results_top_5, k=5)
+            map1 = mapk(ground_truth, results_top_5, k=1)
             
+            print(params, distance_name, map1, map5)
 
+        # special case
+        print("Querying...", params, "emd_distance")
+        results_top_5 = []
+        for image in queries:
+            query_descriptor = descriptor_maker.make_descriptor(image['image'])
+            top_5 = database.query(query_descriptor, lambda h1, h2: distances.emd_multichannel(h1, h2, num_channels=int(query_descriptor.shape[0] / params['bins']), bins_per_channel=params['bins']), k=5)
+            results_top_5.append([im.id for im in top_5])
 
-
-
-        print("Computing descriptors..")
-        add_descriptors_to_dataset(database)
-        add_descriptors_to_dataset(queries)
-
-        for query in queries:
-            print("Querying...")
-            closest_k = find_k_closests(query, database, k=1)
-            print("Showing...")
-            show_results(query, closest_k)
-
-
+        map5 = mapk(ground_truth, results_top_5, k=5)
+        map1 = mapk(ground_truth, results_top_5, k=1)
+        
+        print(params, "emd_distance", map1, map5)
 
 
 if __name__ == "__main__":

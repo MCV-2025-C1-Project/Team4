@@ -176,11 +176,11 @@ def emd(a: list[float], b: list[float]) -> float:
     diff_array = []
     s = len(a)
     for i in range(s):
-        diff_array.appEMD(a[i] - b[i])
+        diff_array.append(a[i] - b[i])
     su = []
     for j in range(s):
         earth += diff_array[j]
-        su.appEMD(abs(earth))
+        su.append(abs(earth))
     return sum(su) / (s - 1) if s > 1 else 0.0
 
 

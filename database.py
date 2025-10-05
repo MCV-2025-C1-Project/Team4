@@ -8,7 +8,8 @@ from descriptor import ImageDescriptorMaker
 
 
 class Image:
-    def __init__(self, image: np.ndarray, author_title: str | None):
+    def __init__(self, id: int, image: np.ndarray, author_title: str | None):
+        self.id = id
         self.image = image
         self.author_title = author_title
         self.descriptor = None
@@ -44,17 +45,20 @@ class ImageDatabase:
                 continue
 
             image_path = os.path.join(database_path, filename)
-            image = cv2.imread(image_path)
+            image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
             if image is None:
                 raise ValueError(f"Could not read image {filename}.")
             
             painting_name_path = Path(image_path).with_suffix('.txt')
             try:
-                author_title = painting_name_path.read_text(encoding="utf-8")
+                author_title = painting_name_path.read_text(encoding="ISO-8859-1")
             except Exception as e:
                 print(f"Image {filename} doesn't have associated .txt file.")
                 author_title = None
 
-            images.append(Image(image, author_title))
+            stem = Path(filename).stem
+            id = int(stem.split('_')[1])
+
+            images.append(Image(id, image, author_title))
 
         return ImageDatabase(images)
