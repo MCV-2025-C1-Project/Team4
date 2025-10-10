@@ -237,11 +237,11 @@ class WeightStrategy(enum.Enum):
 def image_blocks_identity(image: np.ndarray) -> list[np.ndarray]:
     return [image]
 
-def image_blocks_fourths(image: np.ndarray) -> list[np.ndarray]:
+def image_blocks_nm(image: np.ndarray, shape: list = (2,2)) -> list[np.ndarray]:
     blocks = []
 
     h, w, _ = image.shape
-    block_h, block_w = h // 2, w // 2
+    block_h, block_w = h // shape[0], w // shape[1]
 
     for i in range(2):
         for j in range(2):
@@ -249,6 +249,22 @@ def image_blocks_fourths(image: np.ndarray) -> list[np.ndarray]:
             blocks.append(block)
 
     return blocks
+
+def image_blocks_pyramid(image: np.ndarray, shapes: list[tuple[int, int]] = [(1,1)]) -> list[np.ndarray]:
+    blocks = []
+    for shape in shapes:
+        sub_blocks = image_blocks_nm(image, shape)
+        blocks.extend(sub_blocks)
+    return blocks
+
+
+def make_image_block_splitter(shape: tuple[int, int]) -> Callable[[np.ndarray], list[np.ndarray]]:
+    return lambda image: image_blocks_nm(image, blocks_shape=shape)
+
+
+def make_pyramid_image_block_splitter(shapes: list[tuple[int, int]]) -> Callable[[np.ndarray], list[np.ndarray]]:
+    return lambda image: image_blocks_pyramid(image, shapes=shapes)
+
 
 class ImageDescriptorMaker:
     def __init__(self, *, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, weights: None | WeightStrategy, image_blocks: Callable[[np.ndarray], list[np.ndarray]] = image_blocks_identity):
@@ -294,7 +310,7 @@ class ImageDescriptorMaker:
                 case ColorSpace.YUV:
                     descriptor_parts.append(self.compute_yuv_descriptor(image))
                 case _:
-                    raise ValueError("Unknown color space.")
+                    raise ValueError(f"Unknown color space: {color_space}.")
 
         descriptor_parts = flatten_list(descriptor_parts)
 
