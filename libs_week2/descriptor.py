@@ -1,5 +1,5 @@
 import enum
-from typing import Callable
+from typing import Callable, Protocol
 import numpy as np
 import cv2
 from pathlib import Path
@@ -234,40 +234,48 @@ class WeightStrategy(enum.Enum):
     CENTER_CROP_15 = 'CENTER_CROP_15'
     # CENTER_CROP_20 = 'CENTER_CROP_20'
 
-def image_blocks_identity(image: np.ndarray) -> list[np.ndarray]:
-    return [image]
+class ImageBlockSplitter(Protocol):
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        ...
 
-def image_blocks_nm(image: np.ndarray, shape: list = (2,2)) -> list[np.ndarray]:
-    blocks = []
+class IdentityImageBlockSplitter(ImageBlockSplitter):
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        return [image]
 
-    h, w, _ = image.shape
-    block_h, block_w = h // shape[0], w // shape[1]
+class GridImageBlockSplitter(ImageBlockSplitter):
+    def __init__(self, shape: tuple[int, int]):
+        super().__init__()
+        self.shape = shape
 
-    for i in range(2):
-        for j in range(2):
-            block = image[i*block_h:(i+1)*block_h, j*block_w:(j+1)*block_w]
-            blocks.append(block)
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        blocks = []
 
-    return blocks
+        h, w, _ = image.shape
+        block_h, block_w = h // self.shape[0], w // self.shape[1]
 
-def image_blocks_pyramid(image: np.ndarray, shapes: list[tuple[int, int]] = [(1,1)]) -> list[np.ndarray]:
-    blocks = []
-    for shape in shapes:
-        sub_blocks = image_blocks_nm(image, shape)
-        blocks.extend(sub_blocks)
-    return blocks
+        for i in range(2):
+            for j in range(2):
+                block = image[i*block_h:(i+1)*block_h, j*block_w:(j+1)*block_w]
+                blocks.append(block)
 
+        return blocks
 
-def make_image_block_splitter(shape: tuple[int, int]) -> Callable[[np.ndarray], list[np.ndarray]]:
-    return lambda image: image_blocks_nm(image, blocks_shape=shape)
+class PyramidImageBlockSplitter(ImageBlockSplitter):
+    def __init__(self, shapes: list[tuple[int, int]]):
+        super().__init__()
+        self.shapes = shapes
 
-
-def make_pyramid_image_block_splitter(shapes: list[tuple[int, int]]) -> Callable[[np.ndarray], list[np.ndarray]]:
-    return lambda image: image_blocks_pyramid(image, shapes=shapes)
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        blocks = []
+        for shape in self.shapes:
+            grid_splitter = GridImageBlockSplitter(shape)
+            sub_blocks = grid_splitter(image)
+            blocks.extend(sub_blocks)
+        return blocks
 
 
 class ImageDescriptorMaker:
-    def __init__(self, *, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, weights: None | WeightStrategy, image_blocks: Callable[[np.ndarray], list[np.ndarray]] = image_blocks_identity):
+    def __init__(self, *, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, weights: None | WeightStrategy, image_blocks: ImageBlockSplitter = IdentityImageBlockSplitter()):
         
         # assert keep_or_discard is None or len(color_spaces) == len(keep_or_discard)
 
