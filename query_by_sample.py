@@ -1,11 +1,11 @@
 import argparse
 import os
 from typing import Any
-from libs_week1.average_precision import mapk
+from libs_week2.average_precision import mapk
 import cv2
-from libs_week1.database import ImageDatabase
-from libs_week1.descriptor import ColorSpace, ImageDescriptor, ImageDescriptorMaker, WeightStrategy
-import libs_week1.distances as distances
+from libs_week2.database import ImageDatabase
+from libs_week2.descriptor import ColorSpace, ImageDescriptor, ImageDescriptorMaker, WeightStrategy, image_blocks_fourths
+import libs_week2.distances as distances
 from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle
@@ -101,6 +101,7 @@ def main():
         keep_or_discard=args.keep_or_discard,
         weights=args.weight_strategy,
         bins=args.bins,
+        image_blocks=image_blocks_fourths
     )
     database.reset_descriptors_and_distances()  # Reset any existing descriptors and distances.
     database.compute_descriptors(descriptor_maker)  # Compute image descriptors for the database.

@@ -234,8 +234,24 @@ class WeightStrategy(enum.Enum):
     CENTER_CROP_15 = 'CENTER_CROP_15'
     # CENTER_CROP_20 = 'CENTER_CROP_20'
 
+def image_blocks_identity(image: np.ndarray) -> list[np.ndarray]:
+    return [image]
+
+def image_blocks_fourths(image: np.ndarray) -> list[np.ndarray]:
+    blocks = []
+
+    h, w, _ = image.shape
+    block_h, block_w = h // 2, w // 2
+
+    for i in range(2):
+        for j in range(2):
+            block = image[i*block_h:(i+1)*block_h, j*block_w:(j+1)*block_w]
+            blocks.append(block)
+
+    return blocks
+
 class ImageDescriptorMaker:
-    def __init__(self, *, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, weights: None | WeightStrategy):
+    def __init__(self, *, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, weights: None | WeightStrategy, image_blocks: Callable[[np.ndarray], list[np.ndarray]] = image_blocks_identity):
         
         # assert keep_or_discard is None or len(color_spaces) == len(keep_or_discard)
 
@@ -245,6 +261,7 @@ class ImageDescriptorMaker:
         self.keep_or_discard = keep_or_discard
         self.bins = bins
         self.weights = weights
+        self.image_blocks = image_blocks
 
 
     def make_descriptor(self, image: np.ndarray) -> np.ndarray:
@@ -308,24 +325,28 @@ class ImageDescriptorMaker:
 
 
     def compute_histograms(self, image):
-        if self.weights:
-            weights = self.compute_weights_image(image)
-            weights_sum = weights.sum()
-        else:
-            weights = None
-            weights_sum = None
-        
-        if len(image.shape) == 2:
-            image = np.expand_dims(image, 2)
+        image_blocks = self.image_blocks(image)
 
         histograms = []
-        for c in range(image.shape[2]):
-            hist = np.histogram(image[:, :, c], bins=self.bins, weights=weights)[0]
-            if weights is None:
-                hist = hist / (image.shape[0] * image.shape[1])
+
+        for block in image_blocks:
+            if self.weights:
+                weights = self.compute_weights_image(image)
+                weights_sum = weights.sum()
             else:
-                hist = hist / weights_sum
-            histograms.append(hist)
+                weights = None
+                weights_sum = None
+            
+            if len(block.shape) == 2:
+                block = np.expand_dims(image, 2)
+            
+            for c in range(block.shape[2]):
+                hist = np.histogram(block[:, :, c], bins=self.bins, weights=weights)[0]
+                if weights is None:
+                    hist = hist / (block.shape[0] * block.shape[1])
+                else:
+                    hist = hist / weights_sum
+                histograms.append(hist)
 
         return histograms
 
