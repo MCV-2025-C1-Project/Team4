@@ -1,6 +1,6 @@
 import abc
 import enum
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 import numpy as np
 import cv2
 from pathlib import Path
@@ -38,6 +38,10 @@ def bgr_to_cmyk(bgr_image):
     cmyk[np.isnan(cmyk)] = 0
 
     return cmyk
+
+# https://stackoverflow.com/questions/5595425/how-to-compare-floats-for-almost-equality-in-python
+def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
+    return abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
 
 
 class ImageDescriptor:
@@ -304,11 +308,18 @@ def image_blocks_nm(image: np.ndarray, blocks_shape: list = (2,2)) -> list[np.nd
 class ImageBlockSplitter(Protocol):
     def __call__(self, image: np.ndarray) -> list[np.ndarray]:
         ...
+        
+    def to_dict(self) -> dict[str, Any]:
+        pass
 
 
 class IdentityImageBlockSplitter(ImageBlockSplitter):
     def __call__(self, image: np.ndarray) -> list[np.ndarray]:
         return [image]
+    
+    def to_dict(self):
+        d = {'class': self.__class__.__name__}
+        return d
 
 
 class GridImageBlockSplitter(ImageBlockSplitter):
@@ -326,6 +337,13 @@ class GridImageBlockSplitter(ImageBlockSplitter):
                 blocks.append(block)
 
         return blocks
+    
+    def to_dict(self):
+        d = {
+            'class': self.__class__.__name__,
+            'shape': self.shape,
+        }
+        return d
 
 
 class PyramidImageBlockSplitter(ImageBlockSplitter):
@@ -340,6 +358,13 @@ class PyramidImageBlockSplitter(ImageBlockSplitter):
             sub_blocks = grid_splitter(image)
             blocks.extend(sub_blocks)
         return blocks
+    
+    def to_dict(self):
+        d = {
+            'class': self.__class__.__name__,
+            'shapes': self.shapes,
+        }
+        return d
 
 
 class HistogramComputer(abc.ABC):
@@ -372,6 +397,14 @@ class HistogramComputer(abc.ABC):
             #     return create_center_crop_weight(image.shape[0], image.shape[1], 0.2)
             case _:
                 raise ValueError("Unknown weight strategy.")
+            
+    def to_dict(self) -> dict[str, Any]:
+        d = {
+            'class': self.__class__.__name__,
+            'weight_strategy': self.weight_strategy.value if self.weight_strategy else None,
+            'block_splitter': self.block_splitter.to_dict(),
+        }
+        return d
 
 class Histogram1D(HistogramComputer):
     def __init__(self, channels: list[int], bins: int, weight_strategy: WeightStrategy | None, block_splitter: ImageBlockSplitter, range_: tuple[float, float] = (0, 1)):
@@ -382,7 +415,7 @@ class Histogram1D(HistogramComputer):
 
     def __call__(self, image: np.ndarray) -> list[np.ndarray]:
         image_blocks = self.block_splitter(image)
-        if self.weights:
+        if self.weight_strategy:
             weights = self.compute_weights_image(image)
             weight_blocks = self.block_splitter(weights)
         else:
@@ -403,6 +436,13 @@ class Histogram1D(HistogramComputer):
                 histograms.append(hist)
 
         return histograms
+    
+    def to_dict(self):
+        d = super().to_dict()
+        d['class'] = self.__class__.__name__
+        d['bins'] = self.bins
+        d['channels'] = self.channels
+        return d
 
 
 class Histogram2D(HistogramComputer):
@@ -413,9 +453,9 @@ class Histogram2D(HistogramComputer):
         self.channel_pairs = channel_pairs
 
     def __call__(self, image: np.ndarray) -> list[np.ndarray]:
-        image_blocks = self.image_blocks(image)
+        image_blocks = self.block_splitter(image)
         
-        if self.weights:
+        if self.weight_strategy:
             weights = self.compute_weights_image(image)
             weight_blocks = self.block_splitter(weights)
         else:
@@ -444,9 +484,16 @@ class Histogram2D(HistogramComputer):
                 else:
                     hist_2d = hist_2d / weight_block.sum()
 
-                hist_matrices.append(hist_2d)
+                hist_matrices.append(hist_2d.ravel()) # FIXME: hacer un ravel aqui es un poco cualquier cosa
 
         return hist_matrices
+    
+    def to_dict(self):
+        d = super().to_dict()
+        d['class'] = self.__class__.__name__
+        d['bins'] = self.bins
+        d['channel_pairs'] = self.channel_pairs
+        return d
 
 
 class Histogram3D(HistogramComputer):
@@ -457,9 +504,9 @@ class Histogram3D(HistogramComputer):
         self.channel_triplets = channel_triplets
 
     def __call__(self, image: np.ndarray) -> list[np.ndarray]:
-        image_blocks = self.image_blocks(image)
+        image_blocks = self.block_splitter(image)
         
-        if self.weights:
+        if self.weight_strategy:
             weights = self.compute_weights_image(image)
             weight_blocks = self.block_splitter(weights)
         else:
@@ -488,11 +535,20 @@ class Histogram3D(HistogramComputer):
                 else:
                     hist_3d = hist_3d / weight_block.sum()
 
+                hist_matrices.append(hist_3d.ravel()) # FIXME: hacer un ravel aqui es un poco cualquier cosa
+
         return hist_matrices
+
+    def to_dict(self):
+        d = super().to_dict()
+        d['class'] = self.__class__.__name__
+        d['bins'] = self.bins
+        d['channel_triplets'] = self.channel_triplets
+        return d
 
 
 class ImageDescriptorMaker:
-    def __init__(self, *, histogram_computer: HistogramComputer, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, image_blocks: ImageBlockSplitter = IdentityImageBlockSplitter(), color_channels: list[int] = [0,1,2]):
+    def __init__(self, *, histogram_computer: HistogramComputer, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace]):
         
         # assert keep_or_discard is None or len(color_spaces) == len(keep_or_discard)
 
@@ -500,11 +556,37 @@ class ImageDescriptorMaker:
         self.gamma_correction = gamma_correction
         self.blur_image = blur_image
         self.color_spaces = color_spaces
-        self.keep_or_discard = keep_or_discard
-        self.bins = bins
-        self.image_blocks = image_blocks
-        self.color_channels = color_channels
 
+
+    def generate_colorspaces_image(self, image: np.ndarray) -> np.ndarray:
+        channel_images = []
+
+        for color_space in self.color_spaces:
+            match color_space:
+                case ColorSpace.RGB:
+                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                case ColorSpace.HSV:
+                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+                case ColorSpace.LAB:
+                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)
+                case ColorSpace.YCRCB:
+                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
+                case ColorSpace.HLS:
+                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2HLS)
+                case ColorSpace.CMYK:
+                    converted = bgr_to_cmyk(image)
+                case ColorSpace.LUV:
+                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2LUV)
+                case ColorSpace.XYZ:
+                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2XYZ)
+                case ColorSpace.YUV:
+                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
+                case _:
+                    raise ValueError(f"Unknown color space: {color_space}.")
+
+            channel_images.append(converted)
+
+        return np.concatenate(channel_images, axis=2)
 
     def make_descriptor(self, image: np.ndarray) -> np.ndarray:
         image = image.astype(np.float32) / 255
@@ -512,84 +594,11 @@ class ImageDescriptorMaker:
         if self.blur_image:
             image = self.blur_image(image)
 
-        descriptor_parts = []
-        for color_space in self.color_spaces:
-            match color_space:
-                case ColorSpace.RGB:
-                    descriptor_parts.append(self.compute_rgb_descriptor(image))
-                # case ColorSpace.GRAY:
-                    # descriptor_parts.append(self.compute_gray_descriptor(image))
-                case ColorSpace.HSV:
-                    descriptor_parts.append(self.compute_hsv_descriptor(image))
-                case ColorSpace.LAB:
-                    descriptor_parts.append(self.compute_lab_descriptor(image))
-                case ColorSpace.YCRCB:
-                    descriptor_parts.append(self.compute_ycrcb_descriptor(image))
-                case ColorSpace.HLS:
-                    descriptor_parts.append(self.compute_hls_descriptor(image))
-                case ColorSpace.CMYK:
-                    descriptor_parts.append(self.compute_cmyk_descriptor(image))
-                case ColorSpace.LUV:
-                    descriptor_parts.append(self.compute_luv_descriptor(image))
-                case ColorSpace.XYZ:
-                    descriptor_parts.append(self.compute_xyz_descriptor(image))
-                case ColorSpace.YUV:
-                    descriptor_parts.append(self.compute_yuv_descriptor(image))
-                case _:
-                    raise ValueError(f"Unknown color space: {color_space}.")
-
-        descriptor_parts = flatten_list(descriptor_parts)
-
-        descriptor_parts = [part for part, kod in zip(descriptor_parts, self.keep_or_discard) if kod == 'K']
-
+        colorspace_image = self.generate_colorspaces_image(image)
+        descriptor_parts = self.histogram_computer(colorspace_image)
+        # for part in descriptor_parts:
+            # assert isclose(part.sum(), 1.0), f"The sum was {part.sum()}"
         return np.concatenate(descriptor_parts)
-
-
-    def compute_histograms(self, image):
-        return self.histogram_computer(image)
-
-    def compute_rgb_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        return self.compute_histograms(image)
-
-    def compute_gray_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        return self.compute_histograms(image)
-
-    def compute_hsv_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        return self.compute_histograms(image)
-    
-    def compute_lab_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)
-        return self.compute_histograms(image)
-    
-    def compute_ycrcb_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
-        return self.compute_histograms(image)
-    
-    def compute_hls_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2HLS)
-        return self.compute_histograms(image)
-
-    def compute_cmyk_descriptor(self, image):
-        image = bgr_to_cmyk(image)
-        return self.compute_histograms(image)
-    
-    def compute_luv_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2LUV)
-        return self.compute_histograms(image)
-
-
-    def compute_xyz_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2XYZ)
-        return self.compute_histograms(image)
-    
-
-    def compute_yuv_descriptor(self, image):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
-        return self.compute_histograms(image)
-    
 
 # if __name__ == "__main__":
     

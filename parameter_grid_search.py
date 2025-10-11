@@ -122,10 +122,7 @@ def main():
             gamma_correction=params['gamma_correction'],
             blur_image=False,
             color_spaces=params['color_spaces'],
-            bins=params['bins'],
-            keep_or_discard=params['keep_or_discard'],
-            weights=params['weight'],
-            image_blocks=params['block_split_strategy']
+            histogram_computer=params['histogram_computer'],
         )
         print("Computing descriptors...")
         # Reset and compute descriptors for the current iteration
@@ -151,14 +148,15 @@ def main():
                 'gamma_correction': params['gamma_correction'],
                 'blur_image': False,
                 'color_spaces': [space.value for space in params['color_spaces']],
-                'bins': params['bins'],
-                'keep_or_discard': params['keep_or_discard'],
-                'weights': params['weight'].value if params['weight'] is not None else None,
+                'histogram_computer': params['histogram_computer'].to_dict(),
                 'distance': distance_name,
                 'map@k1': map1,
                 'map@k5': map5,
             })
 
+
+        # FIXME: this should work
+        """
         # Special case: EMD distance
         print("Querying...", params, "emd_distance")
         results_top_5 = []
@@ -176,8 +174,6 @@ def main():
             'blur_image': False,
             'color_spaces': [space.value for space in params['color_spaces']],
             'bins': params['bins'],
-            'keep_or_discard': params['keep_or_discard'],
-            'weights': params['weight'].value if params['weight'] is not None else None,
             'distance': "emd_distance",
             'map@k1': map1,
             'map@k5': map5,
@@ -200,12 +196,11 @@ def main():
             'blur_image': False,
             'color_spaces': [space.value for space in params['color_spaces']],
             'bins': params['bins'],
-            'keep_or_discard': params['keep_or_discard'],
-            'weights': params['weight'].value if params['weight'] is not None else None,
             'distance': "multichannel_quadratic_form_distance",
             'map@k1': map1,
             'map@k5': map5,
         })
+        """
 
         # Save results for the current hyperparameter configuration
         save_results_for_descriptor(results_folder, i, results_for_descriptor)

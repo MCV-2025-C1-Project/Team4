@@ -179,14 +179,109 @@ def generate_block_splitting_strategies() -> list[descriptor.ImageBlockSplitter]
     
     return strategies
 
-def generate_channels(color_spaces: list[ColorSpace]) -> list[tuple[int, int]]:
-    return [[0, 1, 2]]
+def generate_channels(color_spaces: list[ColorSpace]) -> list[list[int]]:
+    """
+    Generate channel combinations for 1D histograms.
+    Returns different configurations like all channels separately, or combined.
+    """
+    # Count total channels across all color spaces
+    total_channels = sum(
+        4 if space == ColorSpace.CMYK else 3
+        for space in color_spaces
+    )
 
-def generate_channel_pairs(color_spaces: list[ColorSpace]) -> list[tuple[int, int]]:
-    return [[(0, 1), (1, 2), (0, 2)]]
+    if total_channels == 0:
+        return []
 
-def generate_channel_triplets(color_spaces: list[ColorSpace]) -> list[tuple[int, int, int]]:
-    return [[(0, 1, 2)]]
+    # Option 1: Use all channels separately (one list with all channel indices)
+    all_channels = list(range(total_channels))
+
+    # Option 2: Use each channel individually
+    individual_channels = [[i] for i in range(total_channels)]
+
+    # Return different strategies
+    return [
+        all_channels,  # Use all channels together
+        *individual_channels,  # Use each channel separately
+    ]
+
+def generate_channel_pairs(color_spaces: list[ColorSpace]) -> list[list[tuple[int, int]]]:
+    """
+    Generate channel pair combinations for 2D histograms.
+    Returns different configurations of channel pairs.
+    """
+    total_channels = sum(
+        4 if space == ColorSpace.CMYK else 3
+        for space in color_spaces
+    )
+
+    if total_channels < 2:
+        return []
+
+    # Generate all possible pairs
+    all_pairs = list(itertools.combinations(range(total_channels), 2))
+
+    # Option 1: Use all pairs together
+    # Option 2: Use pairs within each color space
+    pairs_per_space = []
+    offset = 0
+    for space in color_spaces:
+        n_channels = 4 if space == ColorSpace.CMYK else 3
+        space_pairs = list(itertools.combinations(range(offset, offset + n_channels), 2))
+        if space_pairs:
+            pairs_per_space.append(space_pairs)
+        offset += n_channels
+
+    results = []
+
+    # All pairs together
+    if all_pairs:
+        results.append(all_pairs)
+
+    # Pairs within each color space
+    for pairs in pairs_per_space:
+        results.append(pairs)
+
+    return results
+
+def generate_channel_triplets(color_spaces: list[ColorSpace]) -> list[list[tuple[int, int, int]]]:
+    """
+    Generate channel triplet combinations for 3D histograms.
+    Returns different configurations of channel triplets.
+    """
+    total_channels = sum(
+        4 if space == ColorSpace.CMYK else 3
+        for space in color_spaces
+    )
+
+    if total_channels < 3:
+        return []
+
+    # Generate all possible triplets
+    all_triplets = list(itertools.combinations(range(total_channels), 3))
+
+    # Option 1: Use all triplets together
+    # Option 2: Use triplets within each color space
+    triplets_per_space = []
+    offset = 0
+    for space in color_spaces:
+        n_channels = 4 if space == ColorSpace.CMYK else 3
+        space_triplets = list(itertools.combinations(range(offset, offset + n_channels), 3))
+        if space_triplets:
+            triplets_per_space.append(space_triplets)
+        offset += n_channels
+
+    results = []
+
+    # All triplets together
+    if all_triplets:
+        results.append(all_triplets)
+
+    # Triplets within each color space
+    for triplets in triplets_per_space:
+        results.append(triplets)
+
+    return results
 
 def generate_histogram_computers(bins: int, color_spaces: list[ColorSpace], block_splitter: descriptor.ImageBlockSplitter) -> list[descriptor.HistogramComputer]:
     computers = []
@@ -194,15 +289,18 @@ def generate_histogram_computers(bins: int, color_spaces: list[ColorSpace], bloc
     if channels:
         for channel in channels:
             computers.append(descriptor.Histogram1D(channel, bins, weight_strategy=None, block_splitter=block_splitter))
-    channel_pairs = generate_channel_pairs(color_spaces)
-    if channel_pairs:
-        for pairs in channel_pairs:
-            computers.append(descriptor.Histogram2D(pairs, bins, weight_strategy=None, block_splitter=block_splitter))
-    
-    channel_triplets = generate_channel_triplets(color_spaces)
-    if channel_triplets:
-        for triplets in channel_triplets:
-            computers.append(descriptor.Histogram3D(triplets, bins, weight_strategy=None, block_splitter=block_splitter))
+            
+    if bins <= 32:
+        channel_pairs = generate_channel_pairs(color_spaces)
+        if channel_pairs:
+            for pairs in channel_pairs:
+                computers.append(descriptor.Histogram2D(pairs, bins, weight_strategy=None, block_splitter=block_splitter))
+        
+    if bins <= 16:
+        channel_triplets = generate_channel_triplets(color_spaces)
+        if channel_triplets:
+            for triplets in channel_triplets:
+                computers.append(descriptor.Histogram3D(triplets, bins, weight_strategy=None, block_splitter=block_splitter))
 
     return computers
 
@@ -217,20 +315,16 @@ def hyperparameter_grid_search() -> Iterator[dict]:
     
     for gamma in gamma_values:
         for color_spaces in color_space_combos:
-            keep_discard_options = generate_keep_discard_patterns(color_spaces)
-            for keep_discard in keep_discard_options:
-                for bins in bin_values:
-                    for block_split_strategy in generate_block_splitting_strategies():
-                        for histogram_computer in generate_histogram_computers(bins, color_spaces, block_split_strategy):
-                            total_combinations += 1
-                            yield {
-                                'gamma_correction': gamma,
-                                'color_spaces': color_spaces,
-                                'bins': bins,
-                                'keep_or_discard': keep_discard,
-                                'histogram_computer': histogram_computer,
-                                'block_split_strategy': block_split_strategy
-                            }
+            for bins in bin_values:
+                for block_split_strategy in generate_block_splitting_strategies():
+                    for histogram_computer in generate_histogram_computers(bins, color_spaces, block_split_strategy):
+                        total_combinations += 1
+                        yield {
+                            'gamma_correction': gamma,
+                            'color_spaces': color_spaces,
+                            'histogram_computer': histogram_computer,
+                            'block_split_strategy': block_split_strategy
+                        }
 
 
 def estimate_grid_size():
@@ -242,22 +336,13 @@ def estimate_grid_size():
     
     color_space_combos = generate_color_space_combinations()
     
-    total_keep_discard = 0
-    for color_spaces in color_space_combos:
-        keep_discard_patterns = generate_keep_discard_patterns(color_spaces)
-        total_keep_discard += len(keep_discard_patterns)
-    
-    avg_keep_discard = total_keep_discard / len(color_space_combos)
-    
     print("gamma_count", gamma_count)
     print("len(color_space_combos)", len(color_space_combos))
-    print("avg_keep_discard", avg_keep_discard)
     print("bin_count", bin_count)
     print("weight_count", weight_count)
     print("block_split_count", block_split_count)
 
-    estimated_total = (gamma_count * len(color_space_combos) * 
-                      avg_keep_discard * bin_count * weight_count * block_split_count)
+    estimated_total = (gamma_count * len(color_space_combos) * bin_count * weight_count * block_split_count)
     
     return int(estimated_total)
 
