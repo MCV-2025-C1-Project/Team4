@@ -96,16 +96,18 @@ def generate_weights():
     return [None] + list(WeightStrategy) # first search
 
 
-def generate_block_splitting_strategies(bins: int) -> list[descriptor.ImageBlockSplitter]:
+def generate_block_splitting_strategies(bins: int, color_spaces: list[ColorSpace]) -> list[descriptor.ImageBlockSplitter]:
     strategies = []
     strategies.append(descriptor.IdentityImageBlockSplitter()) # the base strategy
     
     strategies.append(descriptor.GridImageBlockSplitter((2, 2)))
-    strategies.append(descriptor.GridImageBlockSplitter((3, 3)))
-    strategies.append(descriptor.GridImageBlockSplitter((4, 4)))
-    if bins <= 32:
+    if bins <= 32 and len(color_spaces) == 1:
+        strategies.append(descriptor.GridImageBlockSplitter((3, 3)))
+        strategies.append(descriptor.GridImageBlockSplitter((4, 4)))
+
+    if bins <= 32 and len(color_spaces) == 1:
         strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2)]))
-    if bins <= 16:
+    if bins <= 16 and len(color_spaces) == 1:
         strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2), (3, 3)]))
     # strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2), (3, 3), (4, 4)]))
     
@@ -121,10 +123,12 @@ def generate_preprocess_strategies() -> list[descriptor.ImagePreprocessStep | No
 
     # Option 2: Open mask (erode from edges) + crop
     for remove_ratio in [0.15]:
-        strategies.append(descriptor.Preprocess([
-            descriptor.OpenMask(remove_side_ratio=remove_ratio),
-            descriptor.CropToMask()
-        ]))
+        for gamma in [0.8, 0.9]:
+            strategies.append(descriptor.Preprocess([
+                descriptor.OpenMask(remove_side_ratio=remove_ratio),
+                descriptor.CropToMask(),
+                descriptor.ApplyGamma(gamma)
+            ]))
 
     # Option 3: Just crop without erosion
     # strategies.append(descriptor.Preprocess([
@@ -267,7 +271,7 @@ def hyperparameter_grid_search() -> Iterator[dict]:
 
     for color_spaces in color_space_combos:
         for bins in bin_values:
-            for block_split_strategy in generate_block_splitting_strategies(bins):
+            for block_split_strategy in generate_block_splitting_strategies(bins, color_spaces):
                 for histogram_computer in generate_histogram_computers(bins, color_spaces, block_split_strategy):
                     for preprocess in preprocess_strategies:
                         total_combinations += 1
@@ -389,6 +393,5 @@ def actual_grid_size():
     return total
 
 if __name__ == '__main__':
-    # print("Estimated grid size:", estimate_grid_size())
     print("\nActual grid size:", actual_grid_size())
 
