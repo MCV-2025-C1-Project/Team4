@@ -96,16 +96,17 @@ def generate_weights():
     return [None] + list(WeightStrategy) # first search
 
 
-def generate_block_splitting_strategies() -> list[descriptor.ImageBlockSplitter]:
+def generate_block_splitting_strategies(bins: int) -> list[descriptor.ImageBlockSplitter]:
     strategies = []
     strategies.append(descriptor.IdentityImageBlockSplitter()) # the base strategy
     
     strategies.append(descriptor.GridImageBlockSplitter((2, 2)))
     strategies.append(descriptor.GridImageBlockSplitter((3, 3)))
     strategies.append(descriptor.GridImageBlockSplitter((4, 4)))
-    
-    strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2)]))
-    strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2), (3, 3)]))
+    if bins <= 32:
+        strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2)]))
+    if bins <= 16:
+        strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2), (3, 3)]))
     # strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2), (3, 3), (4, 4)]))
     
     return strategies
@@ -243,7 +244,7 @@ def hyperparameter_grid_search() -> Iterator[dict]:
     for gamma in gamma_values:
         for color_spaces in color_space_combos:
             for bins in bin_values:
-                for block_split_strategy in generate_block_splitting_strategies():
+                for block_split_strategy in generate_block_splitting_strategies(bins):
                     for histogram_computer in generate_histogram_computers(bins, color_spaces, block_split_strategy):
                         total_combinations += 1
                         yield {
