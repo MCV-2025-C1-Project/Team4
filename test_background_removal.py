@@ -7,25 +7,76 @@ import os
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend to avoid Qt conflicts
 import matplotlib.pyplot as plt
+import itertools
+from typing import Iterator
 
 
-def variance_background_removal(image: np.ndarray, thresholds: list[float]):
-    assert image.shape[2] == len(thresholds), "One threshold per channel please"
+def convert_to_colorspace(image: np.ndarray, colorspace: str) -> np.ndarray:
+    """
+    Convert BGR image to specified color space.
+    Returns normalized image in [0, 1] range.
+    """
+    image_float = image.astype(np.float32) / 255.0
 
-    # Normalize image to [0, 1] range
-    image_normalized = image.astype(np.float32) / 255.0
+    if colorspace == 'BGR':
+        return image_float
+    elif colorspace == 'RGB':
+        return cv2.cvtColor(image_float, cv2.COLOR_BGR2RGB)
+    elif colorspace == 'GRAY':
+        gray = cv2.cvtColor(image_float, cv2.COLOR_BGR2GRAY)
+        return np.expand_dims(gray, axis=2)
+    elif colorspace == 'HSV':
+        return cv2.cvtColor(image_float, cv2.COLOR_BGR2HSV)
+    elif colorspace == 'LAB':
+        return cv2.cvtColor(image_float, cv2.COLOR_BGR2LAB)
+    elif colorspace == 'LUV':
+        return cv2.cvtColor(image_float, cv2.COLOR_BGR2LUV)
+    elif colorspace == 'YCRCB':
+        return cv2.cvtColor(image_float, cv2.COLOR_BGR2YCrCb)
+    elif colorspace == 'HLS':
+        return cv2.cvtColor(image_float, cv2.COLOR_BGR2HLS)
+    elif colorspace == 'YUV':
+        return cv2.cvtColor(image_float, cv2.COLOR_BGR2YUV)
+    elif colorspace == 'XYZ':
+        return cv2.cvtColor(image_float, cv2.COLOR_BGR2XYZ)
+    else:
+        raise ValueError(f"Unknown colorspace: {colorspace}")
 
-    height, width = image_normalized.shape[:2]
+
+def variance_background_removal(image: np.ndarray, channel_config: dict):
+    """
+    Remove background based on variance analysis.
+
+    Args:
+        image: BGR image (0-255)
+        channel_config: dict with:
+            - 'channels': list of (colorspace, channel_idx) tuples
+            - 'threshold': variance threshold
+    """
+    channels_to_analyze = []
+
+    # Extract specified channels from their color spaces
+    for colorspace, channel_idx in channel_config['channels']:
+        converted = convert_to_colorspace(image, colorspace)
+        if channel_idx < converted.shape[2]:
+            channels_to_analyze.append(converted[:, :, channel_idx])
+        else:
+            raise ValueError(f"Channel {channel_idx} doesn't exist in {colorspace}")
+
+    # Stack channels into a single array
+    if not channels_to_analyze:
+        raise ValueError("No channels to analyze")
+
+    height, width = channels_to_analyze[0].shape
+    threshold = channel_config['threshold']
 
     # Store bounding boxes for each channel
     bboxes = []
 
-    for c in range(image_normalized.shape[2]):
-        threshold = thresholds[c]
-
+    for channel in channels_to_analyze:
         # Compute variances along each axis
-        variances_h = image_normalized[:,:,c].var(axis=1)  # Variance per row
-        variances_v = image_normalized[:,:,c].var(axis=0)  # Variance per column
+        variances_h = channel.var(axis=1)  # Variance per row
+        variances_v = channel.var(axis=0)  # Variance per column
 
         # Find top edge: scan from top until variance exceeds threshold
         top = 0
@@ -70,6 +121,98 @@ def variance_background_removal(image: np.ndarray, thresholds: list[float]):
         combined_mask[final_top:final_bottom+1, final_left:final_right+1] = 1.0
 
     return combined_mask
+
+
+def generate_channel_configurations() -> Iterator[dict]:
+    """
+    Generate sensible channel configurations for background removal.
+    Returns configurations that are likely to be useful.
+    """
+    # Define thresholds to test (for 0-1 normalized images)
+    thresholds = [0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01]
+
+    # Define channel combinations to test
+    channel_combinations = []
+
+    # 1. Single color space - all channels
+    channel_combinations.append({
+        'name': 'RGB_all',
+        'channels': [('RGB', 0), ('RGB', 1), ('RGB', 2)]
+    })
+    channel_combinations.append({
+        'name': 'LAB_all',
+        'channels': [('LAB', 0), ('LAB', 1), ('LAB', 2)]
+    })
+    channel_combinations.append({
+        'name': 'HSV_all',
+        'channels': [('HSV', 0), ('HSV', 1), ('HSV', 2)]
+    })
+    channel_combinations.append({
+        'name': 'YCRCB_all',
+        'channels': [('YCRCB', 0), ('YCRCB', 1), ('YCRCB', 2)]
+    })
+
+    # 2. Single channels (especially useful ones)
+    channel_combinations.append({
+        'name': 'GRAY',
+        'channels': [('GRAY', 0)]
+    })
+    channel_combinations.append({
+        'name': 'LAB_L',
+        'channels': [('LAB', 0)]  # Lightness
+    })
+    channel_combinations.append({
+        'name': 'HSV_V',
+        'channels': [('HSV', 2)]  # Value
+    })
+    channel_combinations.append({
+        'name': 'HSV_H',
+        'channels': [('HSV', 0)]  # Hue
+    })
+    channel_combinations.append({
+        'name': 'YCRCB_Y',
+        'channels': [('YCRCB', 0)]  # Luma
+    })
+
+    # 3. Interesting cross-color-space combinations
+    channel_combinations.append({
+        'name': 'RGB+HSV_H',
+        'channels': [('RGB', 0), ('RGB', 1), ('RGB', 2), ('HSV', 0)]
+    })
+    channel_combinations.append({
+        'name': 'LAB_L+HSV_V',
+        'channels': [('LAB', 0), ('HSV', 2)]
+    })
+    channel_combinations.append({
+        'name': 'LAB_AB',
+        'channels': [('LAB', 1), ('LAB', 2)]  # Color channels only
+    })
+    channel_combinations.append({
+        'name': 'LAB_L+AB',
+        'channels': [('LAB', 0), ('LAB', 1), ('LAB', 2)]
+    })
+    channel_combinations.append({
+        'name': 'YCRCB_CrCb',
+        'channels': [('YCRCB', 1), ('YCRCB', 2)]  # Chroma only
+    })
+    channel_combinations.append({
+        'name': 'RGB+LAB_L',
+        'channels': [('RGB', 0), ('RGB', 1), ('RGB', 2), ('LAB', 0)]
+    })
+    channel_combinations.append({
+        'name': 'HSV_SV',
+        'channels': [('HSV', 1), ('HSV', 2)]  # Saturation + Value
+    })
+
+    # Generate all combinations
+    for combo in channel_combinations:
+        for threshold in thresholds:
+            yield {
+                'name': combo['name'],
+                'channels': combo['channels'],
+                'threshold': threshold,
+                'description': f"{combo['name']}_thresh_{threshold}"
+            }
 
 
 def visualize_masks(image: np.ndarray, predicted_mask: np.ndarray, gt_mask: np.ndarray, image_name: str = ""):
@@ -244,60 +387,107 @@ def load_queries(queries_path: str):
 if __name__ == '__main__':
     dataset_folder = "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd2_w2"
 
+    print(f"running {len(list(generate_channel_configurations()))} tests.")
+
     queries, _ = load_queries(dataset_folder)
 
-    # Define thresholds per channel (BGR format) - values are for [0, 1] normalized images
-    # For reference: variance of 0-255 range ~= variance of 0-1 range * 255^2
-    thresholds = [0.01, 0.01, 0.01]  # Adjust these values based on your needs
+    # Set to True to visualize masks for best configuration
+    visualize_best = True
+    max_visualize = 3
 
-    # Set to True to visualize masks for each image
-    visualize = True
-    # Number of images to visualize (None = all)
-    max_visualize = 5
+    print("Starting grid search for background removal...")
+    print(f"Total images: {len(queries)}")
 
-    all_metrics = []
+    # Run grid search
+    all_results = []
 
-    for idx, query in enumerate(queries):
-        image = query['image']
-        gt_mask = query['gt_mask']
+    for config in generate_channel_configurations():
+        config_metrics = []
 
-        # Generate predicted mask
-        predicted_mask = variance_background_removal(image, thresholds)
+        for query in queries:
+            image = query['image']
+            gt_mask = query['gt_mask']
 
-        # Convert ground truth to binary (assuming it's 0 or 255)
-        if len(gt_mask.shape) == 3:
-            gt_mask_binary = (gt_mask[:, :, 0] > 127).astype(np.float32)
-        else:
-            gt_mask_binary = (gt_mask > 127).astype(np.float32)
+            try:
+                # Generate predicted mask
+                predicted_mask = variance_background_removal(image, config)
 
-        # Compute metrics
-        metrics = compute_metrics(predicted_mask, gt_mask_binary)
-        metrics['image_name'] = query['name']
-        all_metrics.append(metrics)
+                # Convert ground truth to binary (assuming it's 0 or 255)
+                if len(gt_mask.shape) == 3:
+                    gt_mask_binary = (gt_mask[:, :, 0] > 127).astype(np.float32)
+                else:
+                    gt_mask_binary = (gt_mask > 127).astype(np.float32)
 
-        # Print metrics for this image
-        # print(f"\n{query['name']}:")
-        # print(f"  Precision: {metrics['precision']:.4f}")
-        # print(f"  Recall:    {metrics['recall']:.4f}")
-        # print(f"  F1-score:  {metrics['f1_score']:.4f}")
-        # print(f"  mIoU:      {metrics['miou']:.4f}")
+                # Compute metrics
+                metrics = compute_metrics(predicted_mask, gt_mask_binary)
+                config_metrics.append(metrics)
 
-        # Visualize if requested
-        if visualize:
-            output_path = visualize_masks(image, predicted_mask, gt_mask_binary, query['name'])
-            print(f"  Visualization saved to: {output_path}")
+            except Exception as e:
+                print(f"Error with config {config['description']} on {query['name']}: {e}")
+                continue
 
-    # Compute average metrics
-    print("\n" + "="*50)
-    print("AVERAGE METRICS:")
-    print("="*50)
-    avg_precision = np.mean([m['precision'] for m in all_metrics])
-    avg_recall = np.mean([m['recall'] for m in all_metrics])
-    avg_f1 = np.mean([m['f1_score'] for m in all_metrics])
-    avg_miou = np.mean([m['miou'] for m in all_metrics])
+        # Average metrics for this configuration
+        if config_metrics:
+            avg_metrics = {
+                'config': config['description'],
+                'name': config['name'],
+                'threshold': config['threshold'],
+                'channels': str(config['channels']),
+                'precision': np.mean([m['precision'] for m in config_metrics]),
+                'recall': np.mean([m['recall'] for m in config_metrics]),
+                'f1_score': np.mean([m['f1_score'] for m in config_metrics]),
+                'miou': np.mean([m['miou'] for m in config_metrics]),
+            }
+            all_results.append(avg_metrics)
 
-    print(f"Precision: {avg_precision:.4f}")
-    print(f"Recall:    {avg_recall:.4f}")
-    print(f"F1-score:  {avg_f1:.4f}")
-    print(f"mIoU:      {avg_miou:.4f}")
-    print("="*50)
+            print(f"{config['description']:40s} | mIoU: {avg_metrics['miou']:.4f} | "
+                  f"F1: {avg_metrics['f1_score']:.4f} | "
+                  f"Precision: {avg_metrics['precision']:.4f} | "
+                  f"Recall: {avg_metrics['recall']:.4f}")
+
+    # Sort by mIoU (descending)
+    all_results.sort(key=lambda x: x['miou'], reverse=True)
+
+    # Display top results
+    print("\n" + "="*100)
+    print("TOP 10 CONFIGURATIONS (sorted by mIoU):")
+    print("="*100)
+    for i, result in enumerate(all_results[:10], 1):
+        print(f"{i:2d}. {result['config']:40s} | mIoU: {result['miou']:.4f} | "
+              f"F1: {result['f1_score']:.4f} | P: {result['precision']:.4f} | R: {result['recall']:.4f}")
+
+    # Save results to CSV
+    import pandas as pd
+    df = pd.DataFrame(all_results)
+    df.to_csv('background_removal_grid_search_results.csv', index=False)
+    print(f"\n✅ Results saved to: background_removal_grid_search_results.csv")
+
+    # Visualize best configuration
+    if visualize_best and all_results:
+        best_config = all_results[0]
+        print(f"\n{'='*100}")
+        print(f"Visualizing BEST configuration: {best_config['config']}")
+        print(f"{'='*100}")
+
+        # Reconstruct config dict
+        best_config_dict = None
+        for config in generate_channel_configurations():
+            if config['description'] == best_config['config']:
+                best_config_dict = config
+                break
+
+        if best_config_dict:
+            for idx, query in enumerate(queries[:]):
+                image = query['image']
+                gt_mask = query['gt_mask']
+
+                predicted_mask = variance_background_removal(image, best_config_dict)
+
+                if len(gt_mask.shape) == 3:
+                    gt_mask_binary = (gt_mask[:, :, 0] > 127).astype(np.float32)
+                else:
+                    gt_mask_binary = (gt_mask > 127).astype(np.float32)
+
+                output_path = visualize_masks(image, predicted_mask, gt_mask_binary,
+                                             f"{query['name']}_{best_config['name']}")
+                print(f"  Saved: {output_path}")
