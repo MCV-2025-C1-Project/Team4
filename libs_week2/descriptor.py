@@ -584,10 +584,10 @@ class ImageDescriptorMaker:
         if mask is None:
             mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
 
+        image = image.astype(np.float32) / 255
+
         if self.preprocess is not None:
             image, mask = self.preprocess(image, mask)
-
-        image = image.astype(np.float32) / 255
 
         colorspace_image = self.generate_colorspaces_image(image)
         descriptor_parts = self.histogram_computer(colorspace_image)
