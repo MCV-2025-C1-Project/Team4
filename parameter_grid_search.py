@@ -26,7 +26,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def load_queries(queries_path: str):
+def load_queries(queries_path: str) -> tuple[list[dict[str, Any]], list[list[int]]]:
     queries = []
     # Load ground truth correspondences
     gt = pickle.load(open(os.path.join(queries_path, "gt_corresps.pkl"), 'rb'))
@@ -108,14 +108,16 @@ def main():
         database.reset_descriptors_and_distances()
         database.compute_descriptors(descriptor_maker)
 
+        for query in queries:
+            query['descriptor'] = descriptor_maker.make_descriptor(query['image'], query['mask'])
+
         results_for_descriptor = []
         # Evaluate using simple distance functions
         for distance_name, distance in distances.iter_simple_distances():
             print("Querying...", params, distance_name)
             results_top_5 = []
             for query in queries:
-                query_descriptor = descriptor_maker.make_descriptor(query['image'], query['mask'])
-                top_5 = database.query(query_descriptor, distance, k=5)
+                top_5 = database.query(query['descriptor'], distance, k=5)
                 results_top_5.append([im.id for im in top_5])
 
             # Compute evaluation metrics
