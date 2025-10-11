@@ -3,6 +3,7 @@ import os
 from typing import Any
 import cv2
 import numpy as np
+import time
 from libs_week2.average_precision import mapk
 from libs_week2.database import ImageDatabase
 from libs_week2.descriptor import ImageDescriptorMaker
@@ -104,26 +105,41 @@ def main():
             preprocess=params['preprocess'],
         )
         print("Computing descriptors...")
-        # Reset and compute descriptors for the current iteration
+
+        # Time database descriptor computation
+        start_time = time.time()
         database.reset_descriptors_and_distances()
         database.compute_descriptors(descriptor_maker)
+        database_descriptor_time = time.time() - start_time
 
+        # Time query descriptor computation
+        start_time = time.time()
         for query in queries:
             query['descriptor'] = descriptor_maker.make_descriptor(query['image'], query['mask'])
+        queries_descriptor_time = time.time() - start_time
+
+        print(f"Descriptor computation times:")
+        print(f"  Database: {database_descriptor_time:.2f}s")
+        print(f"  Queries:  {queries_descriptor_time:.2f}s")
 
         results_for_descriptor = []
         # Evaluate using simple distance functions
         for distance_name, distance in distances.iter_simple_distances():
             print("Querying...", params, distance_name)
+
+            # Time distance computation
+            start_time = time.time()
             results_top_5 = []
             for query in queries:
                 top_5 = database.query(query['descriptor'], distance, k=5)
                 results_top_5.append([im.id for im in top_5])
+            distance_computation_time = time.time() - start_time
 
             # Compute evaluation metrics
             map5 = mapk(ground_truth, results_top_5, k=5)
             map1 = mapk(ground_truth, results_top_5, k=1)
             print(params, distance_name, map1, map5)
+            print(f"  {distance_name}: map@k1={map1:.4f}, map@k5={map5:.4f}, time={distance_computation_time:.2f}s")
 
             # Get preprocess description
             preprocess_dict = None
@@ -137,6 +153,11 @@ def main():
                 'distance': distance_name,
                 'map@k1': map1,
                 'map@k5': map5,
+                'time_database_descriptors': database_descriptor_time,
+                'time_queries_descriptors': queries_descriptor_time,
+                'time_total_descriptors': database_descriptor_time + queries_descriptor_time,
+                'time_distance_computation': distance_computation_time,
+                'time_total': database_descriptor_time + queries_descriptor_time + distance_computation_time,
             })
 
 
