@@ -83,75 +83,6 @@ def generate_color_space_combinations():
     return combinations
 
 
-
-def generate_keep_discard_patterns(color_spaces: list[ColorSpace]):
-    """
-    Generate smart keep/discard patterns for given color spaces.
-    
-    Rules:
-    - RGB, CMYK, XYZ, LAB, LUV: Always keep all channels (primary/perceptual)
-    - GRAY: Always keep (only 1 channel)
-    - HSV, HLS: Keep all if alone, otherwise keep only H or V/L when paired
-    - YCrCb, YUV: Keep all if alone, otherwise keep Y or CrCb/UV when paired
-    """
-    is_alone = len(color_spaces) == 1
-    
-    # Define color space categories
-    primary_spaces = {ColorSpace.RGB, ColorSpace.CMYK, ColorSpace.XYZ, 
-                     ColorSpace.LAB, ColorSpace.LUV}
-    hue_based = {ColorSpace.HSV, ColorSpace.HLS}
-    luma_chroma = {ColorSpace.YCRCB, ColorSpace.YUV}
-    
-    pattern_parts = []
-    
-    for space in color_spaces:
-        """
-        if space == ColorSpace.GRAY:
-            # Grayscale: always keep
-            pattern_parts.append(['K'])
-        """
-        
-        if space in primary_spaces:
-            # Primary/perceptual color spaces: always keep all
-            if space == ColorSpace.CMYK:
-                pattern_parts.append(['KKKK'])
-            else:
-                pattern_parts.append(['KKK'])
-        
-        elif space in hue_based:
-            if is_alone:
-                # If alone, keep all channels
-                pattern_parts.append(['KKK'])
-            else:
-                # If paired, use either H or V/L (last channel)
-                if space == ColorSpace.HSV:
-                    # HSV: H, S, V -> keep H or V
-                    pattern_parts.append(['KDD', 'DDK'])  # H only or V only
-                else:  # HLS
-                    # HLS: H, L, S -> keep H or L
-                    pattern_parts.append(['KDD', 'DKD'])  # H only or L only
-        
-        elif space in luma_chroma:
-            if is_alone:
-                # If alone, keep all channels
-                pattern_parts.append(['KKK'])
-            else:
-                # If paired, use either Y or CrCb/UV
-                # Y, Cr, Cb or Y, U, V -> keep Y or CrCb/UV
-                pattern_parts.append(['KDD', 'DKK'])  # Y only or CrCb/UV only
-        
-        else:
-            # Fallback: keep all channels (3 for any other space)
-            pattern_parts.append(['KKK'])
-    
-    # Generate all combinations from the pattern parts
-    patterns = []
-    for combo in itertools.product(*pattern_parts):
-        patterns.append(''.join(combo))
-    
-    return patterns
-
-
 def generate_bins():
     return [4, 8, 16, 32, 64] # third search (W2)
     return [8, 12, 16, 24, 32, 48, 64] # second search
@@ -193,16 +124,12 @@ def generate_channels(color_spaces: list[ColorSpace]) -> list[list[int]]:
     if total_channels == 0:
         return []
 
-    # Option 1: Use all channels separately (one list with all channel indices)
+    # Use all channels together (individual channels don't work well)
     all_channels = list(range(total_channels))
 
-    # Option 2: Use each channel individually
-    individual_channels = [[i] for i in range(total_channels)]
-
-    # Return different strategies
+    # Return only the all-channels strategy
     return [
         all_channels,  # Use all channels together
-        *individual_channels,  # Use each channel separately
     ]
 
 def generate_channel_pairs(color_spaces: list[ColorSpace]) -> list[list[tuple[int, int]]]:
@@ -290,13 +217,13 @@ def generate_histogram_computers(bins: int, color_spaces: list[ColorSpace], bloc
         for channel in channels:
             computers.append(descriptor.Histogram1D(channel, bins, weight_strategy=None, block_splitter=block_splitter))
             
-    if bins <= 32:
+    if False and bins <= 16:
         channel_pairs = generate_channel_pairs(color_spaces)
         if channel_pairs:
             for pairs in channel_pairs:
                 computers.append(descriptor.Histogram2D(pairs, bins, weight_strategy=None, block_splitter=block_splitter))
         
-    if bins <= 16:
+    if False and bins <= 8:
         channel_triplets = generate_channel_triplets(color_spaces)
         if channel_triplets:
             for triplets in channel_triplets:
@@ -348,11 +275,88 @@ def estimate_grid_size():
 
 def actual_grid_size():
     total = 0
-    for _ in hyperparameter_grid_search():
+
+    # Track distinct parameter values
+    distinct_gamma = set()
+    distinct_color_spaces = set()
+    distinct_bins = set()
+    distinct_block_splitters = set()
+    distinct_histogram_types = set()
+    distinct_histogram_channels = set()
+
+    for config in hyperparameter_grid_search():
         total += 1
+
+        # Extract parameters
+        distinct_gamma.add(config['gamma_correction'])
+
+        # Color spaces (convert list to tuple for hashing)
+        color_space_tuple = tuple(sorted([cs.value for cs in config['color_spaces']]))
+        distinct_color_spaces.add(color_space_tuple)
+
+        # Histogram computer details
+        histo_computer = config['histogram_computer']
+        histogram_type = type(histo_computer).__name__
+        distinct_histogram_types.add(histogram_type)
+
+        # Bins (inside histogram computer)
+        if hasattr(histo_computer, 'bins'):
+            distinct_bins.add(histo_computer.bins)
+
+        # Histogram channels configuration
+        if hasattr(histo_computer, 'channels'):
+            distinct_histogram_channels.add(tuple(histo_computer.channels))
+        elif hasattr(histo_computer, 'channel_pairs'):
+            distinct_histogram_channels.add(tuple(tuple(p) for p in histo_computer.channel_pairs))
+        elif hasattr(histo_computer, 'channel_triplets'):
+            distinct_histogram_channels.add(tuple(tuple(t) for t in histo_computer.channel_triplets))
+
+        # Block splitter details
+        block_splitter = config['block_split_strategy']
+        splitter_type = type(block_splitter).__name__
+
+        if hasattr(block_splitter, 'shape'):
+            splitter_desc = f"{splitter_type}_{block_splitter.shape}"
+        elif hasattr(block_splitter, 'shapes'):
+            splitter_desc = f"{splitter_type}_{tuple(block_splitter.shapes)}"
+        else:
+            splitter_desc = splitter_type
+
+        distinct_block_splitters.add(splitter_desc)
+
+    # Print detailed analysis
+    print("\n" + "="*80)
+    print("PARAMETER DIVERSITY ANALYSIS")
+    print("="*80)
+    print(f"Total configurations: {total}")
+    print("\nDistinct parameter values:")
+    print(f"  Gamma corrections:       {len(distinct_gamma):4d} distinct values")
+    print(f"    Values: {sorted(distinct_gamma)}")
+    print(f"  Color space combos:      {len(distinct_color_spaces):4d} distinct combinations")
+    print(f"  Bins:                    {len(distinct_bins):4d} distinct values")
+    print(f"    Values: {sorted(distinct_bins)}")
+    print(f"  Block splitters:         {len(distinct_block_splitters):4d} distinct strategies")
+    for splitter in sorted(distinct_block_splitters):
+        print(f"    - {splitter}")
+    print(f"  Histogram types:         {len(distinct_histogram_types):4d} distinct types")
+    for htype in sorted(distinct_histogram_types):
+        print(f"    - {htype}")
+    print(f"  Histogram channel configs: {len(distinct_histogram_channels):4d} distinct configurations")
+
+    print("\nTop 10 most common color space combinations:")
+    color_space_counts = {}
+    for config in hyperparameter_grid_search():
+        cs_tuple = tuple(sorted([cs.value for cs in config['color_spaces']]))
+        color_space_counts[cs_tuple] = color_space_counts.get(cs_tuple, 0) + 1
+
+    for idx, (cs, count) in enumerate(sorted(color_space_counts.items(), key=lambda x: x[1], reverse=True)[:10], 1):
+        print(f"  {idx:2d}. {'+'.join(cs):30s} : {count:4d} configurations")
+
+    print("="*80)
+
     return total
 
 if __name__ == '__main__':
-    print(estimate_grid_size())
-    print(actual_grid_size())
+    print("Estimated grid size:", estimate_grid_size())
+    print("\nActual grid size:", actual_grid_size())
 
