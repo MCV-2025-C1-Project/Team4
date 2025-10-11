@@ -419,15 +419,27 @@ class Preprocess(ImagePreprocessStep):
             image, mask = step(image, mask)
         return image, mask
 
+    def to_dict(self) -> dict:
+        return {
+            'class': self.__class__.__name__,
+            'steps': [step.to_dict() for step in self.steps]
+        }
+
 
 class ApplyGamma(ImagePreprocessStep):
     def __init__(self, gamma: float):
         super().__init__()
         self.gamma = gamma
-        
+
     def __call__(self, image, mask):
         return image ** self.gamma, mask
-    
+
+    def to_dict(self) -> dict:
+        return {
+            'class': self.__class__.__name__,
+            'gamma': self.gamma
+        }
+
 class OpenMask(ImagePreprocessStep):
     def __init__(self, remove_side_ratio: float):
         super().__init__()
@@ -477,6 +489,11 @@ class OpenMask(ImagePreprocessStep):
 
         return image, opened_mask
 
+    def to_dict(self) -> dict:
+        return {
+            'class': self.__class__.__name__,
+            'remove_side_ratio': self.remove_side_ratio
+        }
 
 
 class CropToMask(ImagePreprocessStep):
@@ -519,16 +536,18 @@ class CropToMask(ImagePreprocessStep):
 
         return cropped_image, cropped_mask
 
+    def to_dict(self) -> dict:
+        return {
+            'class': self.__class__.__name__
+        }
+
 
 class ImageDescriptorMaker:
-    def __init__(self, *, histogram_computer: HistogramComputer, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace]):
-        
-        # assert keep_or_discard is None or len(color_spaces) == len(keep_or_discard)
+    def __init__(self, *, histogram_computer: HistogramComputer, color_spaces: list[ColorSpace], preprocess: ImagePreprocessStep | None = None):
 
         self.histogram_computer = histogram_computer
-        self.gamma_correction = gamma_correction
-        self.blur_image = blur_image
         self.color_spaces = color_spaces
+        self.preprocess = preprocess
 
 
     def generate_colorspaces_image(self, image: np.ndarray) -> np.ndarray:
@@ -561,11 +580,14 @@ class ImageDescriptorMaker:
 
         return np.concatenate(channel_images, axis=2)
 
-    def make_descriptor(self, image: np.ndarray) -> np.ndarray:
+    def make_descriptor(self, image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
+        if mask is None:
+            mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
+
+        if self.preprocess is not None:
+            image, mask = self.preprocess(image, mask)
+
         image = image.astype(np.float32) / 255
-        image = image ** self.gamma_correction
-        if self.blur_image:
-            image = self.blur_image(image)
 
         colorspace_image = self.generate_colorspaces_image(image)
         descriptor_parts = self.histogram_computer(colorspace_image)

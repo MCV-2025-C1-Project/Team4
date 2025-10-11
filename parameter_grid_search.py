@@ -2,9 +2,10 @@ import argparse
 import os
 from typing import Any
 import cv2
+import numpy as np
 from libs_week2.average_precision import mapk
 from libs_week2.database import ImageDatabase
-from libs_week2.descriptor import ImageDescriptor, ImageDescriptorMaker
+from libs_week2.descriptor import ImageDescriptorMaker
 import libs_week2.distances as distances
 from matplotlib import pyplot as plt
 from pathlib import Path
@@ -34,9 +35,19 @@ def load_queries(queries_path: str):
             continue
         image_path = os.path.join(queries_path, filename)
         image = cv2.imread(image_path)
-        # Add each query image with its filename and ground truth id
+
+        # Load mask if available, otherwise create full white mask
+        mask_path = Path(image_path).with_suffix('.png')
+        if mask_path.exists():
+            mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        else:
+            # Use full white mask for queries without mask
+            mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
+
+        # Add each query image with its filename, ground truth id, and mask
         queries.append({
             'image': image,
+            'mask': mask,
             'name': filename,
             'gt': int(Path(image_path).stem)
         })
@@ -88,10 +99,9 @@ def main():
 
         # Initialize descriptor maker using current hyperparameters
         descriptor_maker = ImageDescriptorMaker(
-            gamma_correction=params['gamma_correction'],
-            blur_image=False,
             color_spaces=params['color_spaces'],
             histogram_computer=params['histogram_computer'],
+            preprocess=params['preprocess'],
         )
         print("Computing descriptors...")
         # Reset and compute descriptors for the current iteration
@@ -103,8 +113,8 @@ def main():
         for distance_name, distance in distances.iter_simple_distances():
             print("Querying...", params, distance_name)
             results_top_5 = []
-            for image in queries:
-                query_descriptor = descriptor_maker.make_descriptor(image['image'])
+            for query in queries:
+                query_descriptor = descriptor_maker.make_descriptor(query['image'], query['mask'])
                 top_5 = database.query(query_descriptor, distance, k=5)
                 results_top_5.append([im.id for im in top_5])
 
@@ -113,11 +123,15 @@ def main():
             map1 = mapk(ground_truth, results_top_5, k=1)
             print(params, distance_name, map1, map5)
 
+            # Get preprocess description
+            preprocess_dict = None
+            if params['preprocess'] is not None:
+                preprocess_dict = params['preprocess'].to_dict()
+
             results_for_descriptor.append({
-                'gamma_correction': params['gamma_correction'],
-                'blur_image': False,
                 'color_spaces': [space.value for space in params['color_spaces']],
                 'histogram_computer': params['histogram_computer'].to_dict(),
+                'preprocess': preprocess_dict,
                 'distance': distance_name,
                 'map@k1': map1,
                 'map@k5': map5,

@@ -4,7 +4,7 @@ from typing import Callable, Self
 import cv2
 import numpy as np
 
-from libs_week1.descriptor import ImageDescriptorMaker
+from libs_week2.descriptor import ImageDescriptorMaker
 
 
 class Image:
@@ -27,7 +27,7 @@ class ImageDatabase:
 
     def compute_descriptors(self, descriptor_maker: ImageDescriptorMaker):
         for image in self.images:
-            image.descriptor = descriptor_maker.make_descriptor(image.image)
+            image.descriptor = descriptor_maker.make_descriptor(image.image, image.mask)
 
     def query(self, query_descriptor: np.ndarray, distance: Callable[[np.ndarray, np.ndarray], float], k):
         for image in self.images:
@@ -52,7 +52,7 @@ class ImageDatabase:
             
             mask_path = Path(os.path.join(database_path, filename)).with_suffix('.png')
             if mask_path.exists():
-                mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
+                mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
                 if mask is None:
                     raise ValueError(f"Could not read mask {mask_path.name}.")
             else:
