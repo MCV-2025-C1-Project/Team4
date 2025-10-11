@@ -5,7 +5,7 @@ import cv2
 from libs_week2.average_precision import mapk
 from libs_week2.database import ImageDatabase
 from libs_week2.descriptor import ImageDescriptor, ImageDescriptorMaker
-import libs_week1.distances as distances
+import libs_week2.distances as distances
 from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle
