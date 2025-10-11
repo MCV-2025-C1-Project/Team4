@@ -428,7 +428,7 @@ class Histogram1D(HistogramComputer):
                 block = np.expand_dims(image, 2)
             
             for c in self.channels:
-                hist = np.histogram(block[:, :, c], bins=self.bins, weights=weight_block)[0]
+                hist = np.histogram(block[:, :, c], bins=self.bins, weights=weight_block, range=self.range_)[0]
                 if weight_block is None:
                     hist = hist / (block.shape[0] * block.shape[1])
                 else:
@@ -479,7 +479,7 @@ class Histogram2D(HistogramComputer):
                     weights=weight_block.ravel() if weight_block is not None else None
                 )
 
-                if weights is None:
+                if weight_block is None:
                     hist_2d = hist_2d / hist_2d.sum()
                 else:
                     hist_2d = hist_2d / weight_block.sum()
@@ -526,11 +526,11 @@ class Histogram3D(HistogramComputer):
                 hist_3d, _ = np.histogramdd(
                     sample=(ch1, ch2, ch3),
                     bins=self.bins,
-                    weights=weight_block.ravel() if weights is not None else None,
+                    weights=weight_block.ravel() if weight_block is not None else None,
                     range=[self.range_, self.range_, self.range_]
                 )
 
-                if weights is None:
+                if weight_block is None:
                     hist_3d = hist_3d / hist_3d.sum()
                 else:
                     hist_3d = hist_3d / weight_block.sum()
