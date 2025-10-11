@@ -123,7 +123,7 @@ def generate_preprocess_strategies() -> list[descriptor.ImagePreprocessStep | No
 
     # Option 2: Open mask (erode from edges) + crop
     for remove_ratio in [0.15]:
-        for gamma in [0.8, 0.9]:
+        for gamma in [0.7, 0.8, 0.9, 1.0]:
             strategies.append(descriptor.Preprocess([
                 descriptor.OpenMask(remove_side_ratio=remove_ratio),
                 descriptor.CropToMask(),
