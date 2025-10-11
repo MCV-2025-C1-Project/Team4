@@ -331,8 +331,8 @@ class GridImageBlockSplitter(ImageBlockSplitter):
         blocks = []
         h, w, _ = image.shape
         block_h, block_w = h // self.shape[0], w // self.shape[1]
-        for i in range(2):
-            for j in range(2):
+        for i in range(self.shape[0]):
+            for j in range(self.shape[1]):
                 block = image[i*block_h:(i+1)*block_h, j*block_w:(j+1)*block_w]
                 blocks.append(block)
 
