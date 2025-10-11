@@ -43,37 +43,6 @@ def load_queries(queries_path: str):
     return queries, gt
 
 
-def add_descriptors_to_dataset(dataset: list[dict[str, Any]]):
-    descriptor_maker = ImageDescriptor(normalize_histograms=True)
-    # Compute and add descriptor for each dataset entry
-    for entry in dataset:
-        entry['descriptor'] = descriptor_maker.compute_descriptor(entry['image'])
-
-
-# Split the dataset into the query image and the rest based on name matching
-def split_query_and_dataset(dataset: list[dict[str, Any]], query_name: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    query = None
-    new_dataset = []
-    for entry in dataset:
-        if entry['name'] == query_name:
-            query = entry
-        else:
-            new_dataset.append(entry)
-    # Ensure the query was found and the split is valid
-    assert query is not None
-    assert len(dataset) == (len(new_dataset) + 1)
-    return query, new_dataset
-
-
-def find_k_closests(query: dict[str, Any], dataset: list[dict[str, Any]], k=2):
-    for entry in dataset:
-        # Calculate L1 distance between query and dataset entries
-        distance = distances.l1_distance(entry['descriptor'], query['descriptor'])
-        entry['distance'] = distance
-    # Return the top k entries with smallest distances
-    return list(sorted(dataset, key=lambda e: e['distance']))[:k]
-
-
 def show_results(query, results):
     plt.figure()
     plt.title('Query')
