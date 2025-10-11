@@ -8,9 +8,10 @@ from libs_week1.descriptor import ImageDescriptorMaker
 
 
 class Image:
-    def __init__(self, id: int, image: np.ndarray, author_title: str | None):
+    def __init__(self, id: int, image: np.ndarray, mask: np.ndarray, author_title: str | None):
         self.id = id
         self.image = image
+        self.mask = mask
         self.author_title = author_title
         self.descriptor = None
         self.distance = None
@@ -49,6 +50,14 @@ class ImageDatabase:
             if image is None:
                 raise ValueError(f"Could not read image {filename}.")
             
+            mask_path = Path(os.path.join(database_path, filename)).with_suffix('.png')
+            if mask_path.exists():
+                mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
+                if mask is None:
+                    raise ValueError(f"Could not read mask {mask_path.name}.")
+            else:
+                mask = np.ones(image.shape[:2])
+            
             painting_name_path = Path(image_path).with_suffix('.txt')
             try:
                 author_title = painting_name_path.read_text(encoding="ISO-8859-1")
@@ -59,6 +68,6 @@ class ImageDatabase:
             stem = Path(filename).stem
             id = int(stem.split('_')[1])
 
-            images.append(Image(id, image, author_title))
+            images.append(Image(id, image, mask, author_title))
 
         return ImageDatabase(images)

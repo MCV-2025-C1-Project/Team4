@@ -1,5 +1,6 @@
+import abc
 import enum
-from typing import Callable
+from typing import Callable, Protocol
 import numpy as np
 import cv2
 from pathlib import Path
@@ -299,17 +300,208 @@ def image_blocks_nm(image: np.ndarray, blocks_shape: list = (2,2)) -> list[np.nd
 
     return blocks
 
+
+class ImageBlockSplitter(Protocol):
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        ...
+
+
+class IdentityImageBlockSplitter(ImageBlockSplitter):
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        return [image]
+
+
+class GridImageBlockSplitter(ImageBlockSplitter):
+    def __init__(self, shape: tuple[int, int]):
+        super().__init__()
+        self.shape = shape
+
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        blocks = []
+        h, w, _ = image.shape
+        block_h, block_w = h // self.shape[0], w // self.shape[1]
+        for i in range(2):
+            for j in range(2):
+                block = image[i*block_h:(i+1)*block_h, j*block_w:(j+1)*block_w]
+                blocks.append(block)
+
+        return blocks
+
+
+class PyramidImageBlockSplitter(ImageBlockSplitter):
+    def __init__(self, shapes: list[tuple[int, int]]):
+        super().__init__()
+        self.shapes = shapes
+
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        blocks = []
+        for shape in self.shapes:
+            grid_splitter = GridImageBlockSplitter(shape)
+            sub_blocks = grid_splitter(image)
+            blocks.extend(sub_blocks)
+        return blocks
+
+
+class HistogramComputer(abc.ABC):
+    def __init__(self, weight_strategy: WeightStrategy, block_splitter: ImageBlockSplitter):
+        super().__init__()
+        self.weight_strategy = weight_strategy
+        self.block_splitter = block_splitter
+    
+    @abc.abstractmethod
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        ...
+        
+    def compute_weights_image(self, image: np.ndarray) -> np.ndarray:
+        match self.weight_strategy:
+            case WeightStrategy.PYRAMID:
+                return create_pyramid_weight(image.shape[0], image.shape[1])
+            # case WeightStrategy.CUADRATIC_PYRAMID:
+            #     return create_cuadraticp_pyramid_weight(image.shape[0], image.shape[1])
+            # case WeightStrategy.CONE:
+            #     return create_cone_weight(image.shape[0], image.shape[1])
+            # case WeightStrategy.CUADRATIC_CONE:
+            #     return create_cuadratic_cone_weight(image.shape[0], image.shape[1])
+            case WeightStrategy.CENTER_CROP_05:
+                return create_center_crop_weight(image.shape[0], image.shape[1], 0.05)
+            case WeightStrategy.CENTER_CROP_10:
+                return create_center_crop_weight(image.shape[0], image.shape[1], 0.1)
+            case WeightStrategy.CENTER_CROP_15:
+                return create_center_crop_weight(image.shape[0], image.shape[1], 0.15)
+            # case WeightStrategy.CENTER_CROP_20:
+            #     return create_center_crop_weight(image.shape[0], image.shape[1], 0.2)
+            case _:
+                raise ValueError("Unknown weight strategy.")
+
+class Histogram1D(HistogramComputer):
+    def __init__(self, channels: list[int], bins: int, weight_strategy: WeightStrategy | None, block_splitter: ImageBlockSplitter, range_: tuple[float, float] = (0, 1)):
+        super().__init__(weight_strategy, block_splitter)
+        self.bins = bins
+        self.range_ = range_
+        self.channels = channels
+
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        image_blocks = self.block_splitter(image)
+        if self.weights:
+            weights = self.compute_weights_image(image)
+            weight_blocks = self.block_splitter(weights)
+        else:
+            weights = None
+            weight_blocks = [None for _ in image_blocks]
+        
+        histograms = []
+        for block, weight_block in zip(image_blocks, weight_blocks):
+            if len(block.shape) == 2:
+                block = np.expand_dims(image, 2)
+            
+            for c in self.channels:
+                hist = np.histogram(block[:, :, c], bins=self.bins, weights=weight_block)[0]
+                if weight_block is None:
+                    hist = hist / (block.shape[0] * block.shape[1])
+                else:
+                    hist = hist / weight_block.sum()
+                histograms.append(hist)
+
+        return histograms
+
+
+class Histogram2D(HistogramComputer):
+    def __init__(self, channel_pairs: list[tuple[int, int]], bins: int, weight_strategy: WeightStrategy | None, block_splitter: ImageBlockSplitter, range_: tuple[float, float] = (0, 1)):
+        super().__init__(weight_strategy, block_splitter)
+        self.bins = bins
+        self.range_ = range_
+        self.channel_pairs = channel_pairs
+
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        image_blocks = self.image_blocks(image)
+        
+        if self.weights:
+            weights = self.compute_weights_image(image)
+            weight_blocks = self.block_splitter(weights)
+        else:
+            weights = None
+            weight_blocks = [None for _ in image_blocks]
+        
+        hist_matrices = []
+
+        for channel_pair in self.channel_pairs:
+            ch1_idx, ch2_idx = channel_pair
+
+            for block, weight_block in zip(image_blocks, weight_blocks):
+                ch1 = block[:, :, ch1_idx].ravel()
+                ch2 = block[:, :, ch2_idx].ravel()
+
+                hist_2d, _, _ = np.histogram2d(
+                    ch1,
+                    ch2,
+                    bins=self.bins,
+                    range=[self.range_, self.range_],
+                    weights=weight_block.ravel() if weight_block is not None else None
+                )
+
+                if weights is None:
+                    hist_2d = hist_2d / hist_2d.sum()
+                else:
+                    hist_2d = hist_2d / weight_block.sum()
+
+                hist_matrices.append(hist_2d)
+
+        return hist_matrices
+
+
+class Histogram3D(HistogramComputer):
+    def __init__(self, channel_triplets: list[tuple[int, int, int]], bins: int, weight_strategy: WeightStrategy | None, block_splitter: ImageBlockSplitter, range_: tuple[float, float] = (0, 1)):
+        super().__init__(weight_strategy, block_splitter)
+        self.bins = bins
+        self.range_ = range_
+        self.channel_triplets = channel_triplets
+
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        image_blocks = self.image_blocks(image)
+        
+        if self.weights:
+            weights = self.compute_weights_image(image)
+            weight_blocks = self.block_splitter(weights)
+        else:
+            weights = None
+            weight_blocks = [None for _ in image_blocks]
+        
+        hist_matrices = []
+
+        for channel_triplet in self.channel_triplets:
+            ch1_idx, ch2_idx, ch3_idx = channel_triplet
+
+            for block, weight_block in zip(image_blocks, weight_blocks):
+                ch1 = block[:, :, ch1_idx].ravel()
+                ch2 = block[:, :, ch2_idx].ravel()
+                ch3 = block[:, :, ch3_idx].ravel()
+
+                hist_3d, _ = np.histogramdd(
+                    sample=(ch1, ch2, ch3),
+                    bins=self.bins,
+                    weights=weight_block.ravel() if weights is not None else None,
+                    range=[self.range_, self.range_, self.range_]
+                )
+
+                if weights is None:
+                    hist_3d = hist_3d / hist_3d.sum()
+                else:
+                    hist_3d = hist_3d / weight_block.sum()
+
+        return hist_matrices
+
+
 class ImageDescriptorMaker:
-    def __init__(self, *, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, weights: None | WeightStrategy, image_blocks: Callable[[np.ndarray], list[np.ndarray]] = image_blocks_identity, color_channels: list[int] = [0,1,2]):
+    def __init__(self, *, histogram_computer: HistogramComputer, gamma_correction: float, blur_image: False | Callable[[np.ndarray], np.ndarray], color_spaces: list[ColorSpace], bins: int | list[int], keep_or_discard: None | str, image_blocks: ImageBlockSplitter = IdentityImageBlockSplitter(), color_channels: list[int] = [0,1,2]):
         
         # assert keep_or_discard is None or len(color_spaces) == len(keep_or_discard)
 
+        self.histogram_computer = histogram_computer
         self.gamma_correction = gamma_correction
         self.blur_image = blur_image
         self.color_spaces = color_spaces
         self.keep_or_discard = keep_or_discard
         self.bins = bins
-        self.weights = weights
         self.image_blocks = image_blocks
         self.color_channels = color_channels
 
@@ -344,7 +536,7 @@ class ImageDescriptorMaker:
                 case ColorSpace.YUV:
                     descriptor_parts.append(self.compute_yuv_descriptor(image))
                 case _:
-                    raise ValueError("Unknown color space.")
+                    raise ValueError(f"Unknown color space: {color_space}.")
 
         descriptor_parts = flatten_list(descriptor_parts)
 
@@ -352,168 +544,9 @@ class ImageDescriptorMaker:
 
         return np.concatenate(descriptor_parts)
 
-    def compute_weights_image(self, image: np.ndarray) -> np.ndarray:
-        match self.weights:
-            case WeightStrategy.PYRAMID:
-                return create_pyramid_weight(image.shape[0], image.shape[1])
-            # case WeightStrategy.CUADRATIC_PYRAMID:
-            #     return create_cuadraticp_pyramid_weight(image.shape[0], image.shape[1])
-            # case WeightStrategy.CONE:
-            #     return create_cone_weight(image.shape[0], image.shape[1])
-            # case WeightStrategy.CUADRATIC_CONE:
-            #     return create_cuadratic_cone_weight(image.shape[0], image.shape[1])
-            case WeightStrategy.CENTER_CROP_05:
-                return create_center_crop_weight(image.shape[0], image.shape[1], 0.05)
-            case WeightStrategy.CENTER_CROP_10:
-                return create_center_crop_weight(image.shape[0], image.shape[1], 0.1)
-            case WeightStrategy.CENTER_CROP_15:
-                return create_center_crop_weight(image.shape[0], image.shape[1], 0.15)
-            # case WeightStrategy.CENTER_CROP_20:
-            #     return create_center_crop_weight(image.shape[0], image.shape[1], 0.2)
-            case _:
-                raise ValueError("Unknown weight strategy.")
-
 
     def compute_histograms(self, image):
-        image_blocks = self.image_blocks(image)
-
-        histograms = []
-
-        for block in image_blocks:
-            if self.weights:
-                weights = self.compute_weights_image(image)
-                weights_sum = weights.sum()
-            else:
-                weights = None
-                weights_sum = None
-            
-            if len(block.shape) == 2:
-                block = np.expand_dims(image, 2)
-            
-            for c in range(block.shape[2]):
-                hist = np.histogram(block[:, :, c], bins=self.bins, weights=weights)[0]
-                if weights is None:
-                    hist = hist / (block.shape[0] * block.shape[1])
-                else:
-                    hist = hist / weights_sum
-                histograms.append(hist)
-
-        return histograms
-    
-    def compute_1d_histogram(self, image):
-        image_blocks = self.image_blocks(image)
-
-        histograms = []
-
-        for block in image_blocks:
-            if self.weights:
-                weights = self.compute_weights_image(image)
-                weights_sum = weights.sum()
-            else:
-                weights = None
-                weights_sum = None
-            
-            if len(block.shape) == 2:
-                block = np.expand_dims(image, 2)
-            
-            for c in range(block.shape[2]):
-                hist = np.histogram(block[:, :, c], bins=self.bins, weights=weights)[0]
-                if weights is None:
-                    hist = hist / (block.shape[0] * block.shape[1])
-                else:
-                    hist = hist / weights_sum
-                histograms.append(hist)
-
-        return histograms
-    
-    def compute_2d_histogram(self, image):
-
-        image_blocks = self.image_blocks(image)
-        hist_matrices = []
-
-        if len(self.color_channels) != 2:
-            raise ValueError("For 2D histograms, self.color_channels must have exactly 2 channels.")
-
-        ch1_idx, ch2_idx = self.color_channels
-
-        for block in image_blocks:
-            if self.weights:
-                weights = self.compute_weights_image(image)
-                weights_sum = weights.sum()
-            else:
-                weights = None
-                weights_sum = None
-
-            if len(block.shape) == 2:
-                block = np.expand_dims(block, 2)
-
-            # Ensure both channels exist
-            if block.shape[2] <= max(ch1_idx, ch2_idx):
-                raise ValueError(f"Block has {block.shape[2]} channels but color_channels={self.color_channels}")
-
-            ch1 = block[:, :, ch1_idx].ravel()
-            ch2 = block[:, :, ch2_idx].ravel()
-
-            hist_2d, _, _ = np.histogram2d(
-                ch1,
-                ch2,
-                bins=self.bins,
-                range=[[0, 1], [0, 1]],
-                weights=weights.ravel() if weights is not None else None
-            )
-
-            # normalize
-            if weights is None:
-                hist_2d = hist_2d / hist_2d.sum()
-            else:
-                hist_2d = hist_2d / weights_sum
-
-            hist_matrices.append(hist_2d)
-
-        return hist_matrices
-
-
-    def compute_3d_histogram(self, image):
-        image_blocks = self.image_blocks(image)
-        hist_matrices = []
-
-        for block in image_blocks:
-            if self.weights:
-                weights = self.compute_weights_image(image)
-                weights_sum = weights.sum()
-            else:
-                weights = None
-                weights_sum = None
-
-            # ensure shape is (H, W, C)
-            if len(block.shape) == 2:
-                block = np.expand_dims(block, 2)
-
-            n_channels = block.shape[2]
-            if n_channels < 3:
-                # if image has fewer than 3 channels, skip or pad
-                continue
-
-            # Use the first 3 channels (RGB-like)
-            ch1, ch2, ch3 = block[:, :, 0].ravel(), block[:, :, 1].ravel(), block[:, :, 2].ravel()
-
-            hist_3d, _ = np.histogramdd(
-                sample=(ch1, ch2, ch3),
-                bins=self.bins,
-                weights=weights.ravel() if weights is not None else None
-            )
-
-            # normalize
-            if weights is None:
-                hist_3d = hist_3d / hist_3d.sum()
-            else:
-                hist_3d = hist_3d / weights_sum
-
-            hist_matrices.append(hist_3d)
-
-        return hist_matrices
-    
-
+        return self.histogram_computer(image)
 
     def compute_rgb_descriptor(self, image):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)

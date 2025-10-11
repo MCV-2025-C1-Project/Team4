@@ -2,10 +2,12 @@ import itertools
 from typing import Iterator
 import cv2
 
-from libs_week1.descriptor import ColorSpace, WeightStrategy
+from libs_week2.descriptor import ColorSpace, WeightStrategy
+import libs_week2.descriptor as descriptor
 
 
 def generate_gamma_corrections():
+    return [1.0] # third search (W2)
     return [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1] # second search
     return [0.8, 1.0, 1.5] # first search (1.5 performs badly)
     return [0.5, 0.8, 1.0, 1.2, 1.5, 2.0] # hmmmmm
@@ -151,15 +153,58 @@ def generate_keep_discard_patterns(color_spaces: list[ColorSpace]):
 
 
 def generate_bins():
+    return [4, 8, 16, 32, 64] # third search (W2)
     return [8, 12, 16, 24, 32, 48, 64] # second search
     return [4, 8, 16, 32, 64] # first search
     return [4, 8, 16, 32, 64, 128]
 
 
 def generate_weights():
+    return [None] # third search
     return [WeightStrategy.CENTER_CROP_05, WeightStrategy.CENTER_CROP_10, WeightStrategy.CENTER_CROP_15, WeightStrategy.PYRAMID]
     return [None] + list(WeightStrategy) # first search
 
+
+def generate_block_splitting_strategies() -> list[descriptor.ImageBlockSplitter]:
+    strategies = []
+    strategies.append(descriptor.IdentityImageBlockSplitter()) # the base strategy
+    
+    strategies.append(descriptor.GridImageBlockSplitter((2, 2)))
+    strategies.append(descriptor.GridImageBlockSplitter((3, 3)))
+    strategies.append(descriptor.GridImageBlockSplitter((4, 4)))
+    
+    strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2)]))
+    strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2), (3, 3)]))
+    # strategies.append(descriptor.PyramidImageBlockSplitter([(1, 1), (2, 2), (3, 3), (4, 4)]))
+    
+    return strategies
+
+def generate_channels(color_spaces: list[ColorSpace]) -> list[tuple[int, int]]:
+    return [[0, 1, 2]]
+
+def generate_channel_pairs(color_spaces: list[ColorSpace]) -> list[tuple[int, int]]:
+    return [[(0, 1), (1, 2), (0, 2)]]
+
+def generate_channel_triplets(color_spaces: list[ColorSpace]) -> list[tuple[int, int, int]]:
+    return [[(0, 1, 2)]]
+
+def generate_histogram_computers(bins: int, color_spaces: list[ColorSpace], block_splitter: descriptor.ImageBlockSplitter) -> list[descriptor.HistogramComputer]:
+    computers = []
+    channels = generate_channels(color_spaces)
+    if channels:
+        for channel in channels:
+            computers.append(descriptor.Histogram1D(channel, bins, weight_strategy=None, block_splitter=block_splitter))
+    channel_pairs = generate_channel_pairs(color_spaces)
+    if channel_pairs:
+        for pairs in channel_pairs:
+            computers.append(descriptor.Histogram2D(pairs, bins, weight_strategy=None, block_splitter=block_splitter))
+    
+    channel_triplets = generate_channel_triplets(color_spaces)
+    if channel_triplets:
+        for triplets in channel_triplets:
+            computers.append(descriptor.Histogram3D(triplets, bins, weight_strategy=None, block_splitter=block_splitter))
+
+    return computers
 
 def hyperparameter_grid_search() -> Iterator[dict]:
     gamma_values = generate_gamma_corrections()
@@ -173,18 +218,19 @@ def hyperparameter_grid_search() -> Iterator[dict]:
     for gamma in gamma_values:
         for color_spaces in color_space_combos:
             keep_discard_options = generate_keep_discard_patterns(color_spaces)
-            
             for keep_discard in keep_discard_options:
                 for bins in bin_values:
-                    total_combinations += 1
-                    for weight in weight_options:
-                        yield {
-                            'gamma_correction': gamma,
-                            'color_spaces': color_spaces,
-                            'bins': bins,
-                            'keep_or_discard': keep_discard,
-                            'weight': weight
-                        }
+                    for block_split_strategy in generate_block_splitting_strategies():
+                        for histogram_computer in generate_histogram_computers(bins, color_spaces, block_split_strategy):
+                            total_combinations += 1
+                            yield {
+                                'gamma_correction': gamma,
+                                'color_spaces': color_spaces,
+                                'bins': bins,
+                                'keep_or_discard': keep_discard,
+                                'histogram_computer': histogram_computer,
+                                'block_split_strategy': block_split_strategy
+                            }
 
 
 def estimate_grid_size():
@@ -192,6 +238,7 @@ def estimate_grid_size():
     blur_count = len(generate_blur_functions())
     bin_count = len(generate_bins())
     weight_count = len(generate_weights())
+    block_split_count = len(generate_block_splitting_strategies())
     
     color_space_combos = generate_color_space_combinations()
     
@@ -207,9 +254,10 @@ def estimate_grid_size():
     print("avg_keep_discard", avg_keep_discard)
     print("bin_count", bin_count)
     print("weight_count", weight_count)
+    print("block_split_count", block_split_count)
 
     estimated_total = (gamma_count * len(color_space_combos) * 
-                      avg_keep_discard * bin_count * weight_count)
+                      avg_keep_discard * bin_count * weight_count * block_split_count)
     
     return int(estimated_total)
 
@@ -222,3 +270,4 @@ def actual_grid_size():
 if __name__ == '__main__':
     print(estimate_grid_size())
     print(actual_grid_size())
+

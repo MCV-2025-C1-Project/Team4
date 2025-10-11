@@ -2,16 +2,16 @@ import argparse
 import os
 from typing import Any
 import cv2
-from libs_week1.average_precision import mapk
-from libs_week1.database import ImageDatabase
-from libs_week1.descriptor import ImageDescriptor, ImageDescriptorMaker
+from libs_week2.average_precision import mapk
+from libs_week2.database import ImageDatabase
+from libs_week2.descriptor import ImageDescriptor, ImageDescriptorMaker
 import libs_week1.distances as distances
 from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle
 import json
 
-from libs_week1.hyperparameter_combinations import hyperparameter_grid_search
+from libs_week2.hyperparameter_combinations import hyperparameter_grid_search
 
 
 def parse_arguments():
@@ -125,6 +125,7 @@ def main():
             bins=params['bins'],
             keep_or_discard=params['keep_or_discard'],
             weights=params['weight'],
+            image_blocks=params['block_split_strategy']
         )
         print("Computing descriptors...")
         # Reset and compute descriptors for the current iteration
