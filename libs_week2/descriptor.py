@@ -602,9 +602,11 @@ class ImageDescriptorMaker:
         image = image.astype(np.float32) / 255
 
         if self.preprocess is not None:
-            image, mask = self.preprocess(image, mask)
+            preprocessed_image, preprocessed_mask = self.preprocess(image, mask)
+        else:
+            preprocessed_image, preprocessed_mask = image, mask
 
-        colorspace_image = self.generate_colorspaces_image(image)
+        colorspace_image = self.generate_colorspaces_image(preprocessed_image)
         descriptor_parts = self.histogram_computer(colorspace_image)
         # for part in descriptor_parts:
             # assert isclose(part.sum(), 1.0), f"The sum was {part.sum()}"
