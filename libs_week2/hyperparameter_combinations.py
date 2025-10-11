@@ -111,6 +111,29 @@ def generate_block_splitting_strategies(bins: int) -> list[descriptor.ImageBlock
     
     return strategies
 
+
+def generate_preprocess_strategies() -> list[descriptor.ImagePreprocessStep | None]:
+    """Generate preprocessing pipeline options."""
+    strategies = []
+
+    # Option 1: No preprocessing
+    # strategies.append(None)
+
+    # Option 2: Open mask (erode from edges) + crop
+    for remove_ratio in [0.15]:
+        strategies.append(descriptor.Preprocess([
+            descriptor.OpenMask(remove_side_ratio=remove_ratio),
+            descriptor.CropToMask()
+        ]))
+
+    # Option 3: Just crop without erosion
+    # strategies.append(descriptor.Preprocess([
+    #     descriptor.CropToMask()
+    # ]))
+
+    return strategies
+
+
 def generate_channels(color_spaces: list[ColorSpace]) -> list[list[int]]:
     """
     Generate channel combinations for 1D histograms.
@@ -238,62 +261,67 @@ def hyperparameter_grid_search() -> Iterator[dict]:
     color_space_combos = generate_color_space_combinations()
     bin_values = generate_bins()
     weight_options = generate_weights()
-    
+    preprocess_strategies = generate_preprocess_strategies()
+
     total_combinations = 0
-    
-    for gamma in gamma_values:
-        for color_spaces in color_space_combos:
-            for bins in bin_values:
-                for block_split_strategy in generate_block_splitting_strategies(bins):
-                    for histogram_computer in generate_histogram_computers(bins, color_spaces, block_split_strategy):
+
+    for color_spaces in color_space_combos:
+        for bins in bin_values:
+            for block_split_strategy in generate_block_splitting_strategies(bins):
+                for histogram_computer in generate_histogram_computers(bins, color_spaces, block_split_strategy):
+                    for preprocess in preprocess_strategies:
                         total_combinations += 1
                         yield {
-                            'gamma_correction': gamma,
                             'color_spaces': color_spaces,
                             'histogram_computer': histogram_computer,
-                            'block_split_strategy': block_split_strategy
+                            'block_split_strategy': block_split_strategy,
+                            'preprocess': preprocess
                         }
 
 
 def estimate_grid_size():
-    gamma_count = len(generate_gamma_corrections())
-    blur_count = len(generate_blur_functions())
     bin_count = len(generate_bins())
-    weight_count = len(generate_weights())
-    block_split_count = len(generate_block_splitting_strategies())
-    
+    preprocess_count = len(generate_preprocess_strategies())
     color_space_combos = generate_color_space_combinations()
-    
-    print("gamma_count", gamma_count)
+
+    # Average block splitters per bin value (depends on bins)
+    avg_block_split = sum(len(generate_block_splitting_strategies(b)) for b in generate_bins()) / len(generate_bins())
+
     print("len(color_space_combos)", len(color_space_combos))
     print("bin_count", bin_count)
-    print("weight_count", weight_count)
-    print("block_split_count", block_split_count)
+    print("avg_block_split_count", avg_block_split)
+    print("preprocess_count", preprocess_count)
 
-    estimated_total = (gamma_count * len(color_space_combos) * bin_count * weight_count * block_split_count)
-    
+    # Note: histogram_computer count varies based on color_spaces and bins
+    # This is a rough estimate
+    estimated_total = (len(color_space_combos) * bin_count * avg_block_split * preprocess_count)
+
     return int(estimated_total)
 
 def actual_grid_size():
     total = 0
 
     # Track distinct parameter values
-    distinct_gamma = set()
     distinct_color_spaces = set()
     distinct_bins = set()
     distinct_block_splitters = set()
     distinct_histogram_types = set()
     distinct_histogram_channels = set()
+    distinct_preprocess = set()
 
     for config in hyperparameter_grid_search():
         total += 1
 
-        # Extract parameters
-        distinct_gamma.add(config['gamma_correction'])
-
         # Color spaces (convert list to tuple for hashing)
         color_space_tuple = tuple(sorted([cs.value for cs in config['color_spaces']]))
         distinct_color_spaces.add(color_space_tuple)
+
+        # Preprocessing (convert to string representation)
+        if config['preprocess'] is None:
+            distinct_preprocess.add('None')
+        else:
+            preprocess_str = str(config['preprocess'].to_dict())
+            distinct_preprocess.add(preprocess_str)
 
         # Histogram computer details
         histo_computer = config['histogram_computer']
@@ -331,8 +359,6 @@ def actual_grid_size():
     print("="*80)
     print(f"Total configurations: {total}")
     print("\nDistinct parameter values:")
-    print(f"  Gamma corrections:       {len(distinct_gamma):4d} distinct values")
-    print(f"    Values: {sorted(distinct_gamma)}")
     print(f"  Color space combos:      {len(distinct_color_spaces):4d} distinct combinations")
     print(f"  Bins:                    {len(distinct_bins):4d} distinct values")
     print(f"    Values: {sorted(distinct_bins)}")
@@ -343,6 +369,11 @@ def actual_grid_size():
     for htype in sorted(distinct_histogram_types):
         print(f"    - {htype}")
     print(f"  Histogram channel configs: {len(distinct_histogram_channels):4d} distinct configurations")
+    print(f"  Preprocessing strategies: {len(distinct_preprocess):4d} distinct strategies")
+    for i, prep in enumerate(sorted(distinct_preprocess), 1):
+        # Truncate long preprocessing strings
+        prep_display = prep if len(prep) < 100 else prep[:97] + "..."
+        print(f"    {i}. {prep_display}")
 
     print("\nTop 10 most common color space combinations:")
     color_space_counts = {}
@@ -358,6 +389,6 @@ def actual_grid_size():
     return total
 
 if __name__ == '__main__':
-    print("Estimated grid size:", estimate_grid_size())
+    # print("Estimated grid size:", estimate_grid_size())
     print("\nActual grid size:", actual_grid_size())
 
