@@ -244,14 +244,14 @@ def generate_histogram_computers(bins: int, color_spaces: list[ColorSpace], bloc
     if channels:
         for channel in channels:
             computers.append(descriptor.Histogram1D(channel, bins, weight_strategy=None, block_splitter=block_splitter))
-            
-    if False and bins <= 16:
+    
+    if bins <= 16 and block_splitter.num_blocks() <= 9:
         channel_pairs = generate_channel_pairs(color_spaces)
         if channel_pairs:
             for pairs in channel_pairs:
                 computers.append(descriptor.Histogram2D(pairs, bins, weight_strategy=None, block_splitter=block_splitter))
-        
-    if False and bins <= 8:
+    
+    if bins <= 8 and block_splitter.num_blocks() <= 9:
         channel_triplets = generate_channel_triplets(color_spaces)
         if channel_triplets:
             for triplets in channel_triplets:
@@ -260,11 +260,8 @@ def generate_histogram_computers(bins: int, color_spaces: list[ColorSpace], bloc
     return computers
 
 def hyperparameter_grid_search() -> Iterator[dict]:
-    gamma_values = generate_gamma_corrections()
-    blur_functions = generate_blur_functions()
     color_space_combos = generate_color_space_combinations()
     bin_values = generate_bins()
-    weight_options = generate_weights()
     preprocess_strategies = generate_preprocess_strategies()
 
     total_combinations = 0

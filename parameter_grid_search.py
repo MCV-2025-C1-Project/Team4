@@ -30,7 +30,9 @@ def parse_arguments():
 def load_queries(queries_path: str) -> tuple[list[dict[str, Any]], list[list[int]]]:
     queries = []
     # Load ground truth correspondences
-    gt = pickle.load(open(os.path.join(queries_path, "gt_corresps.pkl"), 'rb'))
+    with open(os.path.join(queries_path, "gt_corresps.pkl"), 'rb') as f:
+        gt = pickle.load(f)
+
     for filename in sorted(os.listdir(queries_path)):
         if not filename.endswith(".jpg"):
             continue

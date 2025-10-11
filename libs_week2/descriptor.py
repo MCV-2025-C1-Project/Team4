@@ -158,6 +158,9 @@ class ImageBlockSplitter(Protocol):
         
     def to_dict(self) -> dict[str, Any]:
         pass
+    
+    def num_blocks(self) -> int:
+        pass
 
 
 class IdentityImageBlockSplitter(ImageBlockSplitter):
@@ -167,6 +170,9 @@ class IdentityImageBlockSplitter(ImageBlockSplitter):
     def to_dict(self):
         d = {'class': self.__class__.__name__}
         return d
+    
+    def num_blocks(self) -> int:
+        return 1
 
 
 class GridImageBlockSplitter(ImageBlockSplitter):
@@ -191,6 +197,9 @@ class GridImageBlockSplitter(ImageBlockSplitter):
             'shape': self.shape,
         }
         return d
+    
+    def num_blocks(self) -> int:
+        return self.shape[0] * self.shape[1]
 
 
 class PyramidImageBlockSplitter(ImageBlockSplitter):
@@ -212,6 +221,12 @@ class PyramidImageBlockSplitter(ImageBlockSplitter):
             'shapes': self.shapes,
         }
         return d
+    
+    def num_blocks(self) -> int:
+        total = 0
+        for shape in self.shapes:
+            total += shape[0] * shape[1]
+        return total
 
 
 class HistogramComputer(abc.ABC):
@@ -327,7 +342,7 @@ class Histogram2D(HistogramComputer):
                 )
 
                 if weight_block is None:
-                    hist_2d = hist_2d / hist_2d.sum()
+                    hist_2d = hist_2d / (block.shape[0] * block.shape[1])
                 else:
                     hist_2d = hist_2d / weight_block.sum()
 
@@ -378,7 +393,7 @@ class Histogram3D(HistogramComputer):
                 )
 
                 if weight_block is None:
-                    hist_3d = hist_3d / hist_3d.sum()
+                    hist_3d = hist_3d / (block.shape[0] * block.shape[1])
                 else:
                     hist_3d = hist_3d / weight_block.sum()
 

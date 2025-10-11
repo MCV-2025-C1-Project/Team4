@@ -56,7 +56,7 @@ class ImageDatabase:
                 if mask is None:
                     raise ValueError(f"Could not read mask {mask_path.name}.")
             else:
-                mask = np.ones(image.shape[:2])
+                mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
             
             painting_name_path = Path(image_path).with_suffix('.txt')
             try:
