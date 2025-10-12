@@ -136,3 +136,25 @@ RGB, HSV, LAB, YCrCb, HLS, CMYK, LUV, XYZ, YUV
 
 - `PYRAMID` - Pyramid-shaped weights from center
 - `CENTER_CROP_05/10/15` - Binary weights keeping center (5%, 10%, or 15% border discarded)
+
+
+### Core Library (`libs_week2/`)
+
+- **`database.py`**
+    - The `Image` class now includes a `mask` attribute to handle image masks.
+    - The `ImageDatabase.load` method now loads an associated `.png` mask for each image if it exists. If no mask is found, a default mask of all white pixels is created.
+    - `compute_descriptors` now passes both the image and its corresponding mask to the descriptor maker.
+
+- **`descriptor.py`**
+    - **Image Preprocessing**: `ImagePreprocessStep`:
+        - `ApplyGamma`: Adjusts the gamma of the image.
+        - `OpenMask`: Erodes the mask to remove noisy edges.
+        - `CropToMask`: Crops the image to the bounding box of the mask content.
+    - **Image Block Splitting**: 
+        - `ImageBlockSplitter`:
+          - `IdentityImageBlockSplitter`: Treats the entire image as a single block (the default).
+          - `GridImageBlockSplitter`: Divides the image into a grid of a specified shape (e.g., 2x2, 3x3).
+          - `PyramidImageBlockSplitter`: Creates a spatial pyramid by combining grids of different resolutions.
+    - **Multi-dimensional Histograms**:
+        - `Histogram1D`, `Histogram2D`, `Histogram3D`: Classes for computing histograms of different dimensionalities.
+    - **`ImageDescriptorMaker`**: Now it takes a `histogram_computer` and a `preprocess` pipeline as arguments. The `make_descriptor` method processes the image and mask through the preprocessing steps, generates the multi-channel color representation, and then uses the specified histogram computer to create the final descriptor.
