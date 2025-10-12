@@ -104,6 +104,18 @@ python parameter_grid_search.py ./data/BBDD ./data/qsd1_w1 --results_folder resu
 
 This will save JSON files (one per configuration) with MAP@1 and MAP@5 results for all distance metrics.
 
+### Mask generator: `wall_remover.py`
+Generates the mask for a set of images in a folder.
+
+#### Example
+```bash
+python wall_remover.py
+```
+
+In the file has to be specified the name of the folder where the images are.
+The script generates a set of .png masks on the same folder.
+
+
 ## Additional Details
 
 ### Core Library (`libs_week1/`)
