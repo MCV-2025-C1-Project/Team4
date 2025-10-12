@@ -133,14 +133,17 @@ def load_queries(queries_path: str, gen_mask=False):
         image = cv2.imread(image_path)
 
         # Load mask if available, otherwise create full white mask
+        # if gen_mask:
+        #     mask = generate_mask(image)
+        # else:
+        #     mask_path = Path(image_path).with_suffix('.png')
+        #     if mask_path.exists():
+        #         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+        #     else:
+        #         mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
+
         mask_path = Path(image_path).with_suffix('.png')
-        if mask_path.exists():
-            mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-        else:
-            if gen_mask:
-                mask = generate_mask(image)
-            else:
-                mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
+        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
 
         queries.append({
             'image': image,
