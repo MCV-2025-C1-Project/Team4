@@ -44,6 +44,56 @@ def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
     return abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
 
 
+def get_colorspace_ranges(color_space: 'ColorSpace') -> list[tuple[float, float]]:
+    """
+    Get the appropriate value ranges for each channel in a color space.
+    Returns a list of (min, max) tuples, one per channel.
+
+    Note: These ranges are for NORMALIZED (0-1) images after dividing by 255.
+    OpenCV cvtColor works on uint8 [0-255] or float32 [0-1] differently.
+    """
+    if color_space == ColorSpace.RGB:
+        return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
+
+    elif color_space == ColorSpace.HSV:
+        # OpenCV HSV on float32 [0-1]: H=[0,1], S=[0,1], V=[0,1]
+        return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
+
+    elif color_space == ColorSpace.LAB:
+        # OpenCV LAB on float32 input [0-1]:
+        # L in [0, 100], a in [-127, 127], b in [-127, 127]
+        # These are the ACTUAL ranges, not normalized to [0,1]!
+        return [(0.0, 100.0), (-127.0, 127.0), (-127.0, 127.0)]
+
+    elif color_space == ColorSpace.LUV:
+        # OpenCV LUV on float32: L=[0,100], u=[-134,220], v=[-140,122] (approx)
+        return [(0.0, 100.0), (-134.0, 220.0), (-140.0, 122.0)]
+
+    elif color_space == ColorSpace.YCRCB:
+        # OpenCV YCrCb on float32 [0-1]: Y=[0,1], Cr=[0,1], Cb=[0,1]
+        return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
+
+    elif color_space == ColorSpace.HLS:
+        # OpenCV HLS on float32: H=[0,1], L=[0,1], S=[0,1]
+        return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
+
+    elif color_space == ColorSpace.YUV:
+        # OpenCV YUV on float32: Y=[0,1], U=[-0.436,0.436], V=[-0.615,0.615] (approx)
+        return [(0.0, 1.0), (-0.5, 0.5), (-0.5, 0.5)]
+
+    elif color_space == ColorSpace.XYZ:
+        # OpenCV XYZ on float32: X=[0,~1], Y=[0,~1], Z=[0,~1]
+        return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
+
+    elif color_space == ColorSpace.CMYK:
+        # Our custom CMYK: all in [0,1]
+        return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
+
+    else:
+        # Default: assume [0, 1] for all channels
+        return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
+
+
 
 def create_pyramid_weight(H: int, W: int):
     y = np.linspace(0, 1, H)
@@ -287,12 +337,12 @@ class Histogram1D(HistogramComputer):
         histograms = []
         for block, weight_block in zip(image_blocks, weight_blocks):
             if len(block.shape) == 2:
-                block = np.expand_dims(image, 2)
+                block = np.expand_dims(block, 2)
             
             for c in self.channels:
-                hist = np.histogram(block[:, :, c], bins=self.bins, weights=weight_block, range=self.range_)[0]
+                hist = np.histogram(block[:, :, c], bins=self.bins, weights=weight_block, range=self.range_)[0].astype(np.float64)
                 if weight_block is None:
-                    hist = hist / (block.shape[0] * block.shape[1])
+                    hist = hist / np.float64(block.shape[0] * block.shape[1])
                 else:
                     hist = hist / weight_block.sum()
                 histograms.append(hist)
@@ -556,6 +606,22 @@ class CropToMask(ImagePreprocessStep):
             'class': self.__class__.__name__
         }
 
+class Crop(ImagePreprocessStep):
+    def __init__(self, remove_side_ratio: float):
+        assert 0 <= remove_side_ratio < 0.5, "remove_side_ratio must be in [0, 0.5)"
+        self.remove_side_ratio = remove_side_ratio
+
+    def __call__(self, image, mask):
+        h, w = image.shape[:2]
+
+        dh = int(h * self.remove_side_ratio)
+        dw = int(w * self.remove_side_ratio)
+
+        cropped_image = image[dh:h - dh, dw:w - dw, ...]
+        cropped_mask = mask[dh:h - dh, dw:w - dw, ...] if mask is not None else None
+
+        return cropped_image, cropped_mask
+
 
 class ImageDescriptorMaker:
     def __init__(self, *, histogram_computer: HistogramComputer, color_spaces: list[ColorSpace], preprocess: ImagePreprocessStep | None = None):
@@ -576,6 +642,12 @@ class ImageDescriptorMaker:
                     converted = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
                 case ColorSpace.LAB:
                     converted = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)
+                    # L∈[0,100], a∈[-128,127], b∈[-128,127]
+                    L, a, b = cv2.split(converted)
+                    L = L / 100.0
+                    a = (a + 128.0) / 255.0
+                    b = (b + 128.0) / 255.0
+                    converted = cv2.merge([L, a, b])
                 case ColorSpace.YCRCB:
                     converted = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
                 case ColorSpace.HLS:
@@ -583,11 +655,22 @@ class ImageDescriptorMaker:
                 case ColorSpace.CMYK:
                     converted = bgr_to_cmyk(image)
                 case ColorSpace.LUV:
-                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2LUV)
+                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2Luv)
+                    # L∈[0,100], u∈[-134,220], v∈[-140,122] (approx)
+                    L, u, v = cv2.split(converted)
+                    L = L / 100.0
+                    u = (u + 134.0) / (220.0 + 134.0)   # scale to [0,1]
+                    v = (v + 140.0) / (122.0 + 140.0)   # scale to [0,1]
+                    converted = cv2.merge([L, u, v])
                 case ColorSpace.XYZ:
                     converted = cv2.cvtColor(image, cv2.COLOR_BGR2XYZ)
                 case ColorSpace.YUV:
                     converted = cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
+                    # Y∈[0,1], U,V∈[-0.436,0.436],[-0.615,0.615]
+                    Y, U, V = cv2.split(converted)
+                    U = (U + 0.436) / (2 * 0.436)
+                    V = (V + 0.615) / (2 * 0.615)
+                    converted = cv2.merge([Y, U, V])
                 case _:
                     raise ValueError(f"Unknown color space: {color_space}.")
 
