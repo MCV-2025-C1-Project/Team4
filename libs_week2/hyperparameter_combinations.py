@@ -64,6 +64,7 @@ def generate_color_space_combinations():
 def generate_color_space_combinations():
     all_spaces = list(ColorSpace) # first search
     all_spaces = [ColorSpace.RGB, ColorSpace.LAB, ColorSpace.YCRCB] # second search
+    all_spaces = [ColorSpace.LAB, ColorSpace.YCRCB]  # second search
     combinations = []
     
     for space in all_spaces:
@@ -238,22 +239,22 @@ def generate_channel_triplets(color_spaces: list[ColorSpace]) -> list[list[tuple
 
 def generate_histogram_computers(bins: int, color_spaces: list[ColorSpace], block_splitter: descriptor.ImageBlockSplitter) -> list[descriptor.HistogramComputer]:
     computers = []
-    channels = generate_channels(color_spaces)
-    if channels:
-        for channel in channels:
-            computers.append(descriptor.Histogram1D(channel, bins, weight_strategy=None, block_splitter=block_splitter))
+    # channels = generate_channels(color_spaces)
+    # if channels:
+    #     for channel in channels:
+    #         computers.append(descriptor.Histogram1D(channel, bins, weight_strategy=None, block_splitter=block_splitter))
     
-    # if bins <= 16 and block_splitter.num_blocks() <= 9:
-    #     channel_pairs = generate_channel_pairs(color_spaces)
-    #     if channel_pairs:
-    #         for pairs in channel_pairs:
-    #             computers.append(descriptor.Histogram2D(pairs, bins, weight_strategy=None, block_splitter=block_splitter))
+    if bins <= 8 and block_splitter.num_blocks() <= 4:
+        channel_pairs = generate_channel_pairs(color_spaces)
+        if channel_pairs:
+            for pairs in channel_pairs:
+                computers.append(descriptor.Histogram2D(pairs, bins, weight_strategy=None, block_splitter=block_splitter))
     
-#     if bins <= 8 and block_splitter.num_blocks() <= 9:
-#         channel_triplets = generate_channel_triplets(color_spaces)
-#         if channel_triplets:
-#             for triplets in channel_triplets:
-#                 computers.append(descriptor.Histogram3D(triplets, bins, weight_strategy=None, block_splitter=block_splitter))
+    if bins <= 4 and block_splitter.num_blocks() <= 4:
+        channel_triplets = generate_channel_triplets(color_spaces)
+        if channel_triplets:
+            for triplets in channel_triplets:
+                computers.append(descriptor.Histogram3D(triplets, bins, weight_strategy=None, block_splitter=block_splitter))
 
     return computers
 
