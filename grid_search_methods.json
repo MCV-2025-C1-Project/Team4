@@ -1,0 +1,56 @@
+{
+  "median": {
+    "method": "median",
+    "avg_psnr_gain": NaN,
+    "avg_ssim_gain": 0.05218217393798179,
+    "avg_mse_reduction": -149.55426832458164,
+    "avg_psnr_denoised": Infinity,
+    "avg_ssim_denoised": 0.9150058765084553,
+    "num_images": 30
+  },
+  "adaptive": {
+    "method": "adaptive",
+    "avg_psnr_gain": NaN,
+    "avg_ssim_gain": 0.03745337150475992,
+    "avg_mse_reduction": -149.48311922887825,
+    "avg_psnr_denoised": Infinity,
+    "avg_ssim_denoised": 0.9002770740752335,
+    "num_images": 30
+  },
+  "bilateral": {
+    "method": "bilateral",
+    "avg_psnr_gain": NaN,
+    "avg_ssim_gain": 0.041663015590424395,
+    "avg_mse_reduction": -151.16904175354793,
+    "avg_psnr_denoised": Infinity,
+    "avg_ssim_denoised": 0.904486718160898,
+    "num_images": 30
+  },
+  "nlm": {
+    "method": "nlm",
+    "avg_psnr_gain": NaN,
+    "avg_ssim_gain": 0.02941303893661303,
+    "avg_mse_reduction": -156.27788401163292,
+    "avg_psnr_denoised": Infinity,
+    "avg_ssim_denoised": 0.8922367415070867,
+    "num_images": 30
+  },
+  "morphological": {
+    "method": "morphological",
+    "avg_psnr_gain": NaN,
+    "avg_ssim_gain": 0.05420780156286695,
+    "avg_mse_reduction": -150.00331246551602,
+    "avg_psnr_denoised": Infinity,
+    "avg_ssim_denoised": 0.9170315041333404,
+    "num_images": 30
+  },
+  "cascaded": {
+    "method": "cascaded",
+    "avg_psnr_gain": NaN,
+    "avg_ssim_gain": 0.0500517734710045,
+    "avg_mse_reduction": -151.67249769482302,
+    "avg_psnr_denoised": Infinity,
+    "avg_ssim_denoised": 0.9128754760414781,
+    "num_images": 30
+  }
+}
