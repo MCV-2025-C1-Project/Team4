@@ -4,16 +4,16 @@ from typing import Any
 import cv2
 import numpy as np
 import time
-from libs_week2.average_precision import mapk
-from libs_week2.database import ImageDatabase
-from libs_week2.descriptor import ImageDescriptorMaker
-import libs_week2.distances as distances
+from libs_week3.average_precision import mapk
+from libs_week3.database import ImageDatabase
+from libs_week3.descriptor import ImageDescriptorMaker
+import libs_week3.distances as distances
 from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle
 import json
 
-from libs_week2.hyperparameter_combinations import hyperparameter_grid_search
+from libs_week3.hyperparameter_combinations import hyperparameter_grid_search
 
 
 def parse_arguments():
