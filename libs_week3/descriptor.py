@@ -1,11 +1,11 @@
 import abc
 import enum
-from typing import Any, Callable, Protocol
+from typing import Any, Literal, Protocol
 import numpy as np
 import cv2
 from pathlib import Path
-import pickle
 import matplotlib.pyplot as plt
+from skimage.feature import local_binary_pattern
 
 from libs_week3.preprocessing import ImagePreprocessStep
 
@@ -459,6 +459,28 @@ class Histogram3D(HistogramComputer):
         d['bins'] = self.bins
         d['channel_triplets'] = self.channel_triplets
         return d
+
+
+class LBPHistogramDescriptor(HistogramComputer):
+    def __init__(self, channels: list[int], bins: int, n_points: int, radius: int, method: Literal['default', 'ror', 'uniform', 'nri_uniform', 'var']):
+        super().__init__(None, None)
+        self.channels = channels
+        self.bins = bins
+        self.n_points = n_points
+        self.radius = radius
+        self.method = method
+
+
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        descriptors = []
+        for c in self.channels:
+            lbps = local_binary_pattern(image[:, :, c], P=self.n_points, R=self.radius, method=self.method)
+            hist = np.histogram(lbps, bins=self.bins, range=(0, 255))
+            hist /= hist.sum()
+            descriptors.append(hist)
+
+        return descriptors
+
 
 class ImageDescriptorMaker:
     def __init__(self, *, histogram_computer: HistogramComputer, color_spaces: list[ColorSpace], preprocess: ImagePreprocessStep | None = None):
