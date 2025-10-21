@@ -13,6 +13,50 @@ import json
 
 #GPT SHIT ---------------------------------------------------
 
+import numpy as np
+import cv2
+from scipy.ndimage import median_filter
+
+def detect_impulse_L(l_channel, win=3, alpha=3.0):
+    m = median_filter(l_channel, size=win)
+    mad = np.median(np.abs(l_channel - m))
+    # avoid mad=0
+    th = max(1.0, alpha * mad)
+    mask = np.abs(l_channel - m) > th
+    return mask.astype(np.uint8)  # True=corrupt
+
+def restore_masked_by_unmasked_median(img, mask):
+    # img: HxW or HxWxC; mask: HxW bool (True = noisy)
+    out = img.copy()
+    H,W = mask.shape
+    for y in range(H):
+        for x in range(W):
+            if mask[y,x]:
+                # extract 3x3 neighborhood
+                ys = slice(max(0,y-1), min(H,y+2))
+                xs = slice(max(0,x-1), min(W,x+2))
+                neigh = out[ys,xs]
+                # if color, compute median across unmasked neighbors per channel
+                neigh_mask = mask[ys,xs]
+                if neigh_mask.all():
+                    # fallback: median of neighborhood regardless
+                    out[y,x] = np.median(neigh.reshape(-1, neigh.shape[-1]), axis=0)
+                else:
+                    valid = neigh[~neigh_mask]
+                    out[y,x] = np.median(valid.reshape(-1, neigh.shape[-1]), axis=0)
+    return out
+
+
+def apply_inpainting_denoising(image, win=3, alpha=3.0):
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+
+    mask = detect_impulse_L(lab[:, :, 0], win=win, alpha=alpha)
+    
+    denoised_image = restore_masked_by_unmasked_median(image, mask)
+
+    return denoised_image
+
+
 
 def apply_bilateral_filter(image, d=9, sigma_color=75, sigma_space=75):
     """
@@ -121,7 +165,7 @@ def grid_search_methods(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_augmen
     Returns:
         Dictionary with results for each method
     """
-    methods = ['median', 'adaptive', 'bilateral', 'nlm', 'morphological', 'cascaded']
+    methods = ['median', 'adaptive', 'bilateral', 'nlm', 'morphological', 'cascaded', 'inpaint']
     
     print("="*80)
     print("GRID SEARCH FOR BEST DENOISING METHOD")
@@ -251,14 +295,21 @@ def grid_search_comprehensive(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_
         'cascaded': [
             {'kernel_size': 3},
             {'kernel_size': 5}
-        ]
+        ],
+        'inpaint': [
+            {'win': 3, 'alpha': 3.0},
+            {'win': 5, 'alpha': 3.0},
+            {'win': 3, 'alpha': 5.0},
+            {'win': 5, 'alpha': 5.0},
+        ],
     }
     
     results_by_noise_type = {
         'salt_and_pepper': {},
         'gaussian': {},
         'uniform': {},
-        'none': {}
+        'none': {},
+        'inpaint': {}
     }
     
     for method, configs in test_configs.items():
@@ -302,6 +353,8 @@ def grid_search_comprehensive(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_
                     denoised = apply_morphological_filter(noisy, **config)
                 elif method == 'cascaded' and noise_type == 'salt_and_pepper':
                     denoised = apply_cascaded_filter(noisy, **config)
+                elif method == 'inpaint' and noise_type == 'salt_and_pepper':
+                    denoised = apply_inpainting_denoising(noisy, **config)
                 else:
                     continue
                 
@@ -619,6 +672,8 @@ def remove_noise(image, noise_type, method='adaptive'):
             return apply_median_filter(image, kernel_size=3) #best method for impulse noise, kernel size 3
         elif method == 'gaussian':
             return apply_gaussian_filter(image, kernel_size=3, sigma=1.0)
+        elif method == 'inpaint':
+            return apply_inpainting_denoising(image)
     elif noise_type == "gaussian":
         return apply_adaptive_median_filter(image, max_window_size=5) #works the best on image 6 at this moment, needs a better solution
     
@@ -718,7 +773,7 @@ def evaluate_dataset(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_augmented
 if __name__ == "__main__":
     
     # STEP 1: Test noise detection on sample images - Run it to see what images have noise and some infos
-     for i in range(0, 30):
+    for i in range(0, 30):
         image = cv2.imread(f"qsd1_w3/{i:05d}.jpg")
        
         result = detect_noise(image)
@@ -727,33 +782,33 @@ if __name__ == "__main__":
     
     
     # STEP 2: Evaluate denoising on the whole dataset, and see the result for each image in the json file
-    # results = evaluate_dataset()
-    # # Optional: Save results to file
-    # with open('denoising_evaluationadaptive.json', 'w') as f:
-    #     json.dump(results, f, indent=2)
+    results = evaluate_dataset()
+    # Optional: Save results to file
+    with open('denoising_evaluationadaptive.json', 'w') as f:
+        json.dump(results, f, indent=2)
     
     
     
     # STEP 3: Grid search to find the best parameters
     # Method 1: Simple method comparison
-    # print("\n=== METHOD COMPARISON ===")
-    # method_results = grid_search_methods()
+    print("\n=== METHOD COMPARISON ===")
+    method_results = grid_search_methods()
     
-    # with open('grid_search_methods.json', 'w') as f:
-    #     json.dump({k: v for k, v in method_results.items()}, f, indent=2)
+    with open('grid_search_methods.json', 'w') as f:
+        json.dump({k: v for k, v in method_results.items()}, f, indent=2)
     
     # # Method 2: Comprehensive parameter search
-    # print("\n\n=== COMPREHENSIVE PARAMETER SEARCH ===")
-    # comprehensive_results = grid_search_comprehensive()
+    print("\n\n=== COMPREHENSIVE PARAMETER SEARCH ===")
+    comprehensive_results = grid_search_comprehensive()
     
-    # with open('grid_search_comprehensive.json', 'w') as f:
-    #     json.dump(comprehensive_results, f, indent=2, default=str)
+    with open('grid_search_comprehensive.json', 'w') as f:
+        json.dump(comprehensive_results, f, indent=2, default=str)
     
-    # # Method 3: Save images with best method
-    # print("\n\n=== SAVING BEST DENOISED IMAGES ===")
-    # save_best_denoised_images(output_folder="output_best_method")
+    # Method 3: Save images with best method
+    print("\n\n=== SAVING BEST DENOISED IMAGES ===")
+    save_best_denoised_images(output_folder="output_best_method")
     
-    # print("\n" + "="*80)
-    # print("ALL GRID SEARCH OPERATIONS COMPLETED")
-    # print("="*80)
+    print("\n" + "="*80)
+    print("ALL GRID SEARCH OPERATIONS COMPLETED")
+    print("="*80)
 
