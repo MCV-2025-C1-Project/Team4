@@ -482,6 +482,160 @@ class LBPHistogramDescriptor(HistogramComputer):
         return descriptors
 
 
+class DCTDescriptor(HistogramComputer):
+    """
+    Computes a texture descriptor based on the Discrete Cosine Transform (DCT).
+
+    This descriptor follows the process outlined in the assignment:
+    1. The image is split into blocks.
+    2. For each block and for each specified channel:
+       a. A 2D DCT is applied.
+       b. The resulting coefficients are scanned in a zig-zag pattern.
+       c. The first 'n_coeffs' from the zig-zag scan are kept as the block's feature vector.
+    3. The feature vectors from all blocks are concatenated to form the final descriptor.
+    """
+    def __init__(self, channels: list[int], block_splitter: ImageBlockSplitter, n_coeffs: int):
+        """
+        Initializes the DCTDescriptor.
+
+        Args:
+            channels (list[int]): List of channel indices to compute the descriptor on.
+            block_splitter (ImageBlockSplitter): A strategy for splitting the image into blocks.
+            n_coeffs (int): The number of DCT coefficients to keep from the start of the
+                            zig-zag scan for each block.
+        """
+        # DCT descriptor as described doesn't use a weighting strategy.
+        super().__init__(weight_strategy=None, block_splitter=block_splitter)
+        self.channels = channels
+        self.n_coeffs = n_coeffs
+
+    def _zig_zag_scan(self, matrix: np.ndarray) -> np.ndarray:
+        """
+        Performs a zig-zag scan on a 2D matrix to linearize it.
+        """
+        rows, cols = matrix.shape
+        result = np.empty(rows * cols, dtype=matrix.dtype)
+        r, c = 0, 0
+        moving_up = True
+
+        for i in range(rows * cols):
+            result[i] = matrix[r, c]
+
+            if moving_up:
+                if c == cols - 1:  # Hit right wall
+                    r += 1
+                    moving_up = False
+                elif r == 0:  # Hit top wall
+                    c += 1
+                    moving_up = False
+                else:  # Move diagonally up-right
+                    r -= 1
+                    c += 1
+            else:  # Moving down
+                if r == rows - 1:  # Hit bottom wall
+                    c += 1
+                    moving_up = True
+                elif c == 0:  # Hit left wall
+                    r += 1
+                    moving_up = True
+                else:  # Move diagonally down-left
+                    r += 1
+                    c -= 1
+        return result
+
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        """
+        Computes the DCT descriptor for the given image.
+
+        Args:
+            image (np.ndarray): The input image (already converted to the desired colorspaces
+                                and concatenated).
+
+        Returns:
+            list[np.ndarray]: A list containing the feature vectors for each block.
+                              These will be concatenated later by the ImageDescriptorMaker.
+        """
+        image_blocks = self.block_splitter(image)
+        all_block_descriptors = []
+
+        for block in image_blocks:
+            # Ensure block is 3D for consistent channel indexing
+            if len(block.shape) == 2:
+                block = np.expand_dims(block, axis=2)
+
+            for c in self.channels:
+                channel_block = block[:, :, c]
+
+                # The input for cv2.dct must be float32
+                if channel_block.dtype != np.float32:
+                   channel_block = channel_block.astype(np.float32)
+
+                # 1. Apply 2D DCT
+                dct_block = cv2.dct(channel_block)
+
+                # 2. Zig-zag scan
+                zig_zag_coeffs = self._zig_zag_scan(dct_block)
+
+                # 3. Keep first N coefficients
+                # If block is smaller than N coeffs, pad with 0
+                if len(zig_zag_coeffs) < self.n_coeffs:
+                    pad_width = self.n_coeffs - len(zig_zag_coeffs)
+                    block_feature_vector = np.pad(zig_zag_coeffs, (0, pad_width), 'constant')
+                else:
+                    block_feature_vector = zig_zag_coeffs[:self.n_coeffs]
+                
+                all_block_descriptors.append(block_feature_vector)
+        
+        return all_block_descriptors
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serializes the descriptor's configuration."""
+        d = super().to_dict()
+        d['class'] = self.__class__.__name__
+        d['channels'] = self.channels
+        d['n_coeffs'] = self.n_coeffs
+        return d
+
+class WaveletDescriptor(HistogramComputer):
+    """
+    Computes a texture descriptor based on the Discrete Wavelet Transform (DWT).
+    """
+    def __init__(self, channels: list[int], block_splitter: ImageBlockSplitter, wavelet: str = 'haar', level: int = 2):
+        super().__init__(weight_strategy=None, block_splitter=block_splitter)
+        self.channels = channels
+        if level < 1: raise ValueError("Decomposition level must be at least 1.")
+        try: pywt.Wavelet(wavelet)
+        except ValueError: raise ValueError(f"Wavelet '{wavelet}' not found.")
+        self.wavelet = wavelet
+        self.level = level
+
+    def __call__(self, image: np.ndarray) -> list[np.ndarray]:
+        image_blocks = self.block_splitter(image)
+        all_block_descriptors = []
+        for block in image_blocks:
+            if len(block.shape) == 2: block = np.expand_dims(block, axis=2)
+            for c in self.channels:
+                channel_block = block[:, :, c]
+                min_dim = 2**self.level
+                if channel_block.shape[0] < min_dim or channel_block.shape[1] < min_dim:
+                    channel_block = cv2.resize(channel_block, (min_dim, min_dim), interpolation=cv2.INTER_LINEAR)
+                coeffs = pywt.wavedec2(channel_block, self.wavelet, level=self.level)
+                channel_features = []
+                coeffs_flat = [coeffs[0]]
+                for detail_level in coeffs[1:]:
+                    coeffs_flat.extend(detail_level)
+                for band_matrix in coeffs_flat:
+                    mean = np.mean(band_matrix)
+                    std_dev = np.std(band_matrix)
+                    channel_features.extend([mean, std_dev])
+                all_block_descriptors.append(np.array(channel_features, dtype=np.float32))
+        return all_block_descriptors
+
+    def to_dict(self) -> dict[str, Any]:
+        d = super().to_dict()
+        d.update({'channels': self.channels, 'wavelet': self.wavelet, 'level': self.level})
+        return d
+
 class ImageDescriptorMaker:
     def __init__(self, *, histogram_computer: HistogramComputer, color_spaces: list[ColorSpace], preprocess: ImagePreprocessStep | None = None):
 
@@ -618,3 +772,6 @@ if __name__ == "__main__":
             axes[i].imshow(hists_3d[0][:, :, i], cmap='viridis')
             axes[i].set_title(f"3D hist slice {i}")
         plt.show()
+
+
+        
