@@ -6,6 +6,7 @@ import cv2
 from pathlib import Path
 import matplotlib.pyplot as plt
 from skimage.feature import local_binary_pattern
+import pywt
 
 from libs_week3.preprocessing import ImagePreprocessStep
 
@@ -462,8 +463,8 @@ class Histogram3D(HistogramComputer):
 
 
 class LBPHistogramDescriptor(HistogramComputer):
-    def __init__(self, channels: list[int], bins: int, n_points: int, radius: int, method: Literal['default', 'ror', 'uniform', 'nri_uniform', 'var']):
-        super().__init__(None, None)
+    def __init__(self, channels: list[int], bins: int, n_points: int, radius: int, method: Literal['default', 'ror', 'uniform', 'nri_uniform', 'var'], block_splitter: ImageBlockSplitter):
+        super().__init__(None, block_splitter)
         self.channels = channels
         self.bins = bins
         self.n_points = n_points
@@ -475,8 +476,9 @@ class LBPHistogramDescriptor(HistogramComputer):
         descriptors = []
         for c in self.channels:
             lbps = local_binary_pattern(image[:, :, c], P=self.n_points, R=self.radius, method=self.method)
-            hist = np.histogram(lbps, bins=self.bins, range=(0, 255))
-            hist /= hist.sum()
+            hist = np.histogram(lbps, bins=self.bins, range=(0, 255))[0]
+            hist = hist.astype(np.float32)
+            hist = hist / hist.sum()
             descriptors.append(hist)
 
         return descriptors
@@ -604,8 +606,10 @@ class WaveletDescriptor(HistogramComputer):
         super().__init__(weight_strategy=None, block_splitter=block_splitter)
         self.channels = channels
         if level < 1: raise ValueError("Decomposition level must be at least 1.")
-        try: pywt.Wavelet(wavelet)
-        except ValueError: raise ValueError(f"Wavelet '{wavelet}' not found.")
+        # try:
+            # pywt.Wavelet(wavelet)
+        # except ValueError:
+            # raise ValueError(f"Wavelet '{wavelet}' not found.")
         self.wavelet = wavelet
         self.level = level
 

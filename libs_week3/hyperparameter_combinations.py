@@ -1,9 +1,13 @@
 import itertools
 from typing import Iterator
 import cv2
+import pywt
 
-from libs_week2.descriptor import ColorSpace, WeightStrategy
-import libs_week2.descriptor as descriptor
+from libs_week3.descriptor import ColorSpace, WeightStrategy
+import libs_week3.descriptor as descriptor
+import libs_week3.preprocessing as preprocessing
+import libs_week3.denoising as denoising
+from libs_week3.descriptor import IdentityImageBlockSplitter
 
 
 def generate_gamma_corrections():
@@ -64,7 +68,7 @@ def generate_color_space_combinations():
 def generate_color_space_combinations():
     all_spaces = list(ColorSpace) # first search
     all_spaces = [ColorSpace.RGB, ColorSpace.LAB, ColorSpace.YCRCB] # second search
-    all_spaces = [ColorSpace.LAB, ColorSpace.YCRCB]  # second search
+    all_spaces = [ColorSpace.RGB, ColorSpace.LAB, ColorSpace.YCRCB]  # second search
     combinations = []
     
     for space in all_spaces:
@@ -73,8 +77,8 @@ def generate_color_space_combinations():
     rgb_pairs = [
         # ColorSpace.GRAY,    # Luminance info
         # ColorSpace.HSV,     # Hue/saturation info # first search
-        ColorSpace.LAB,     # Perceptual color
-        ColorSpace.YCRCB,   # Luma/chroma separation
+        # ColorSpace.LAB,     # Perceptual color
+        # ColorSpace.YCRCB,   # Luma/chroma separation
         # ColorSpace.HLS,     # Alternative hue representation # first search
     ]
     
@@ -123,16 +127,21 @@ def generate_preprocess_strategies() -> list[descriptor.ImagePreprocessStep | No
     # strategies.append(None)
 
     # Option 2: Open mask (erode from edges) + crop
-    for gamma in [0.8, 1.0]:
-        strategies.append(descriptor.Preprocess([
-            descriptor.CropToMask(),
-            descriptor.ApplyGamma(gamma)
-        ]))
+    # for gamma in [0.8, 1.0]:
+    #     strategies.append(preprocessing.Preprocess([
+    #         preprocessing.CropToMask(),
+    #         preprocessing.ApplyGamma(gamma)
+    #     ]))
 
     # Option 3: Just crop without erosion
     # strategies.append(descriptor.Preprocess([
     #     descriptor.CropToMask()
     # ]))
+
+    strategies.append(preprocessing.Preprocess([
+        preprocessing.CropToMask(),
+        denoising.DenoiseWithMedianFilter(kernel_size=3)
+    ]))
 
     return strategies
 
@@ -258,25 +267,52 @@ def generate_histogram_computers(bins: int, color_spaces: list[ColorSpace], bloc
 
     return computers
 
+def generate_texture_descriptor_computers(color_spaces: list[ColorSpace]) -> list[descriptor.HistogramComputer]:
+    computers = []
+    channels = generate_channels(color_spaces)
+    for channel in channels:
+        for method in ['default', 'ror', 'uniform', 'nri_uniform', 'var']:
+            for radius in [1, 3, 5]:
+                computer = descriptor.LBPHistogramDescriptor(channels=channel, bins=256, n_points=8, radius=radius, method=method, block_splitter=IdentityImageBlockSplitter())
+                computers.append(computer)
+    
+        def diag_to_coeffs(diag: int):
+            return int(diag * (diag + 1) / 2)
+    
+    for channel in channels:
+        for n_coeffs in [diag_to_coeffs(3), diag_to_coeffs(5), diag_to_coeffs(10), diag_to_coeffs(15), diag_to_coeffs(20),]:
+            computer = descriptor.DCTDescriptor(channels=channel, n_coeffs=n_coeffs, block_splitter=IdentityImageBlockSplitter())
+            computers.append(computer)
+    
+    for channel in channels:
+        # print(f"wavelet count = {len(pywt.wavelist())}")
+        # for name in pywt.wavelist():
+            # print(f"\t{name}")
+        for wavelet in ['db2', 'db4', 'db8', 'sym3', 'sym6', 'sym8', 'coif1', 'coif3', 'bior2.2', 'bior3.3', 'bior4.4', 'rbio2.2', 'rbio3.3', 'haar', 'morl', 'cgau1', 'mexh']:
+            for level in [1, 2, 4, 8]:
+                computer = descriptor.WaveletDescriptor(channels=channel, block_splitter=IdentityImageBlockSplitter(), wavelet=wavelet, level=level)
+                computers.append(computer)
+    
+    return computers
+    
+
 def hyperparameter_grid_search() -> Iterator[dict]:
     color_space_combos = generate_color_space_combinations()
-    bin_values = generate_bins()
+    # bin_values = generate_bins()
     preprocess_strategies = generate_preprocess_strategies()
 
     total_combinations = 0
 
     for color_spaces in color_space_combos:
-        for bins in bin_values:
-            for block_split_strategy in generate_block_splitting_strategies(bins, color_spaces):
-                for histogram_computer in generate_histogram_computers(bins, color_spaces, block_split_strategy):
-                    for preprocess in preprocess_strategies:
-                        total_combinations += 1
-                        yield {
-                            'color_spaces': color_spaces,
-                            'histogram_computer': histogram_computer,
-                            'block_split_strategy': block_split_strategy,
-                            'preprocess': preprocess
-                        }
+        for histogram_computer in generate_texture_descriptor_computers(color_spaces):
+            for preprocess in preprocess_strategies:
+                    total_combinations += 1
+                    yield {
+                        'color_spaces': color_spaces,
+                        'histogram_computer': histogram_computer,
+                        'block_split_strategy': IdentityImageBlockSplitter(),
+                        'preprocess': preprocess
+                    }
 
 
 def estimate_grid_size():
