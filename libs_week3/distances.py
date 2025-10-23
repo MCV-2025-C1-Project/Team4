@@ -327,7 +327,7 @@ def iter_simple_distances():
         # ("spearman_correlation", spearman_correlation), # doesn't seem to work
         ("kl_divergence", kl_divergence),
         ("jensen_shannon_divergence", jensen_shannon_divergence),
-        ("simple_quadratic_form_distance", simple_quadratic_form_distance),
+        # ("simple_quadratic_form_distance", simple_quadratic_form_distance),
     ]
 
 
