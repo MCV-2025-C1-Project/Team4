@@ -4,6 +4,7 @@ from typing import Any
 import cv2
 import numpy as np
 import time
+from libs_week3 import denoising
 from libs_week3.average_precision import mapk
 from libs_week3.database import ImageDatabase
 from libs_week3.descriptor import ImageDescriptorMaker
@@ -92,6 +93,10 @@ def main():
 
     print("Loading queries..")
     queries, ground_truth = load_queries(args.queries_path)
+    
+    denoise = denoising.DenoiseWithMedianFilter(kernel_size=3)
+    for query in queries:
+        query['image'], query['mask'] = denoise(query['image'], query['mask'])
 
     # Iterate over hyperparameter settings
     for i, params in enumerate(hyperparameter_grid_search()):
