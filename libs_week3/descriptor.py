@@ -482,6 +482,15 @@ class LBPHistogramDescriptor(HistogramComputer):
             descriptors.append(hist)
 
         return descriptors
+    
+    def to_dict(self):
+        d = super().to_dict()
+        d['channels'] = self.channels
+        d['bins'] = self.bins
+        d['n_points'] = self.n_points
+        d['radius'] = self.radius
+        d['method'] = self.method
+        return d
 
 
 class DCTDescriptor(HistogramComputer):
