@@ -107,7 +107,7 @@ def main():
 
         # Initialize descriptor maker using current hyperparameters
         descriptor_maker = ImageDescriptorMaker(
-            color_spaces=params['color_spaces'],
+            color_conversion=params['color_conversion'],
             histogram_computer=params['histogram_computer'],
             preprocess=params['preprocess'],
         )
@@ -154,7 +154,7 @@ def main():
                 preprocess_dict = params['preprocess'].to_dict()
 
             results_for_descriptor.append({
-                'color_spaces': [space.value for space in params['color_spaces']],
+                'color_conversion':  params['color_conversion'].to_dict() if params['color_conversion'] else None,
                 'histogram_computer': params['histogram_computer'].to_dict(),
                 'preprocess': preprocess_dict,
                 'distance': distance_name,

@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from skimage.feature import local_binary_pattern
 import pywt
 
+from libs_week3.color_conversion import ColorConversion
 from libs_week3.preprocessing import ImagePreprocessStep
 
 
@@ -595,6 +596,8 @@ class DCTDescriptor(HistogramComputer):
                 else:
                     block_feature_vector = zig_zag_coeffs[:self.n_coeffs]
                 
+                block_feature_vector = block_feature_vector / block_feature_vector.sum()
+
                 all_block_descriptors.append(block_feature_vector)
         
         return all_block_descriptors
@@ -650,72 +653,25 @@ class WaveletDescriptor(HistogramComputer):
         return d
 
 class ImageDescriptorMaker:
-    def __init__(self, *, histogram_computer: HistogramComputer, color_spaces: list[ColorSpace], preprocess: ImagePreprocessStep | None = None):
+    def __init__(self, *, histogram_computer: HistogramComputer, color_conversion: ColorConversion, preprocess: ImagePreprocessStep | None = None):
 
         self.histogram_computer = histogram_computer
-        self.color_spaces = color_spaces
+        self.color_conversion = color_conversion
         self.preprocess = preprocess
 
-
-    def generate_colorspaces_image(self, image: np.ndarray) -> np.ndarray:
-        channel_images = []
-
-        for color_space in self.color_spaces:
-            match color_space:
-                case ColorSpace.RGB:
-                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                case ColorSpace.HSV:
-                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-                case ColorSpace.LAB:
-                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)
-                    # L∈[0,100], a∈[-128,127], b∈[-128,127]
-                    L, a, b = cv2.split(converted)
-                    L = L / 100.0
-                    a = (a + 128.0) / 255.0
-                    b = (b + 128.0) / 255.0
-                    converted = cv2.merge([L, a, b])
-                case ColorSpace.YCRCB:
-                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
-                case ColorSpace.HLS:
-                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2HLS)
-                case ColorSpace.CMYK:
-                    converted = bgr_to_cmyk(image)
-                case ColorSpace.LUV:
-                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2Luv)
-                    # L∈[0,100], u∈[-134,220], v∈[-140,122] (approx)
-                    L, u, v = cv2.split(converted)
-                    L = L / 100.0
-                    u = (u + 134.0) / (220.0 + 134.0)   # scale to [0,1]
-                    v = (v + 140.0) / (122.0 + 140.0)   # scale to [0,1]
-                    converted = cv2.merge([L, u, v])
-                case ColorSpace.XYZ:
-                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2XYZ)
-                case ColorSpace.YUV:
-                    converted = cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
-                    # Y∈[0,1], U,V∈[-0.436,0.436],[-0.615,0.615]
-                    Y, U, V = cv2.split(converted)
-                    U = (U + 0.436) / (2 * 0.436)
-                    V = (V + 0.615) / (2 * 0.615)
-                    converted = cv2.merge([Y, U, V])
-                case _:
-                    raise ValueError(f"Unknown color space: {color_space}.")
-
-            channel_images.append(converted)
-
-        return np.concatenate(channel_images, axis=2)
 
     def make_descriptor(self, image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
         if mask is None:
             mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
 
-        image = image.astype(np.float32) / 255
+        # image = image.astype(np.float32) / 255
 
         if self.preprocess is not None:
             preprocessed_image, preprocessed_mask = self.preprocess(image, mask)
         else:
             preprocessed_image, preprocessed_mask = image, mask
 
-        colorspace_image = self.generate_colorspaces_image(preprocessed_image)
+        colorspace_image, preprocessed_mask = self.color_conversion(preprocessed_image, preprocessed_mask)
         descriptor_parts = self.histogram_computer(colorspace_image)
         # for part in descriptor_parts:
             # assert isclose(part.sum(), 1.0), f"The sum was {part.sum()}"

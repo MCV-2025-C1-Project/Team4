@@ -3,6 +3,7 @@ from typing import Iterator
 import cv2
 import pywt
 
+from libs_week3.color_conversion import ColorConversion
 from libs_week3.descriptor import ColorSpace, WeightStrategy
 import libs_week3.descriptor as descriptor
 import libs_week3.preprocessing as preprocessing
@@ -269,20 +270,23 @@ def generate_histogram_computers(bins: int, color_spaces: list[ColorSpace], bloc
 def generate_texture_descriptor_computers(color_spaces: list[ColorSpace]) -> list[descriptor.HistogramComputer]:
     computers = []
     channels = generate_channels(color_spaces)
+    """
     for channel in channels:
         for method in ['default', 'ror', 'uniform', 'nri_uniform', 'var']:
             for radius in [1, 3, 5]:
                 computer = descriptor.LBPHistogramDescriptor(channels=channel, bins=256, n_points=8, radius=radius, method=method, block_splitter=IdentityImageBlockSplitter())
                 computers.append(computer)
-    
-        def diag_to_coeffs(diag: int):
-            return int(diag * (diag + 1) / 2)
+    """
+    def diag_to_coeffs(diag: int):
+        return int(diag * (diag + 1) / 2)
     
     for channel in channels:
-        for n_coeffs in [diag_to_coeffs(3), diag_to_coeffs(5), diag_to_coeffs(10), diag_to_coeffs(15), diag_to_coeffs(20),]:
+        for n_diags in range(1, 31):
+            n_coeffs = diag_to_coeffs(n_diags)
             computer = descriptor.DCTDescriptor(channels=channel, n_coeffs=n_coeffs, block_splitter=IdentityImageBlockSplitter())
             computers.append(computer)
     
+    """
     for channel in channels:
         # print(f"wavelet count = {len(pywt.wavelist())}")
         # for name in pywt.wavelist():
@@ -291,7 +295,8 @@ def generate_texture_descriptor_computers(color_spaces: list[ColorSpace]) -> lis
             for level in [1, 2, 3, 4]:
                 computer = descriptor.WaveletDescriptor(channels=channel, block_splitter=IdentityImageBlockSplitter(), wavelet=wavelet, level=level)
                 computers.append(computer)
-    
+    """
+
     return computers
     
 
@@ -307,7 +312,7 @@ def hyperparameter_grid_search() -> Iterator[dict]:
             for preprocess in preprocess_strategies:
                     total_combinations += 1
                     yield {
-                        'color_spaces': color_spaces,
+                        'color_conversion': ColorConversion(targets=color_spaces, normalize=False),
                         'histogram_computer': histogram_computer,
                         'block_split_strategy': IdentityImageBlockSplitter(),
                         'preprocess': preprocess
