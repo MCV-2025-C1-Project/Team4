@@ -291,7 +291,7 @@ def generate_texture_descriptor_computers(color_spaces: list[ColorSpace]) -> lis
         # print(f"wavelet count = {len(pywt.wavelist())}")
         # for name in pywt.wavelist():
             # print(f"\t{name}")
-        for wavelet in ['db2', 'db4', 'db8', 'sym3', 'sym6', 'sym8', 'coif1', 'coif3', 'bior2.2', 'bior3.3', 'bior4.4', 'rbio2.2', 'rbio3.3', 'haar', 'morl', 'cgau1', 'mexh']:
+        for wavelet in ['db2', 'db4', 'db8', 'sym3', 'sym6', 'sym8', 'coif1', 'coif3', 'bior2.2', 'bior3.3', 'bior4.4', 'rbio2.2', 'rbio3.3', 'haar']:
             for level in [1, 2, 3, 4]:
                 computer = descriptor.WaveletDescriptor(channels=channel, block_splitter=IdentityImageBlockSplitter(), wavelet=wavelet, level=level)
                 computers.append(computer)

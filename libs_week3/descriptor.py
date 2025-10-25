@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from skimage.feature import local_binary_pattern
 import pywt
 
-from libs_week3.color_conversion import ColorConversion
+from libs_week3.color_conversion import ColorConversion, ColorSpace
 from libs_week3.preprocessing import ImagePreprocessStep
 
 
@@ -166,18 +166,6 @@ def create_center_crop_weight(H, W, discard_borders=0.1):
     center_crop_weight[border_h:H-border_h, border_w:W-border_w] = 1.0
     return center_crop_weight
 
-
-class ColorSpace(enum.Enum):
-    RGB = 'RGB'
-    # GRAY = 'GRAY'
-    HSV = 'HSV'
-    LAB = 'LAB'
-    YCRCB = 'YCRCB'
-    HLS = 'HLS'
-    CMYK = 'CMYK'
-    LUV = 'LUV'
-    XYZ = 'XYZ'
-    YUV = 'YUV'
 
 class WeightStrategy(enum.Enum):
     PYRAMID = 'PYRAMID'

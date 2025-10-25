@@ -1,7 +1,21 @@
+import enum
 import cv2
 import numpy as np
-from libs_week3.descriptor import ColorSpace
 from libs_week3.preprocessing import ImagePreprocessStep
+
+
+class ColorSpace(enum.Enum):
+    RGB = 'RGB'
+    # GRAY = 'GRAY'
+    HSV = 'HSV'
+    LAB = 'LAB'
+    YCRCB = 'YCRCB'
+    HLS = 'HLS'
+    CMYK = 'CMYK'
+    LUV = 'LUV'
+    XYZ = 'XYZ'
+    YUV = 'YUV'
+
 
 
 def bgr_to_cmyk(bgr_image):
@@ -107,7 +121,7 @@ class ColorConversion(ImagePreprocessStep):
         return self.generate_colorspaces_image(image), mask
 
     def to_dict(self):
-        d = super().to_dict()
+        d = dict()
         d['targets'] = [colorspace.value for colorspace in self.targets]
         d['normalize'] = self.normalize
         return d
