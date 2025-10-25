@@ -5,6 +5,9 @@ import numpy as np
 from scipy import stats
 import os
 import matplotlib
+
+import team2_segmentation
+
 matplotlib.use('Agg')  # Use non-interactive backend to avoid Qt conflicts
 import matplotlib.pyplot as plt
 import itertools
@@ -229,7 +232,6 @@ def generate_channel_configurations() -> Iterator[dict]:
         'name': 'YCRCB_all',
         'channels': [('YCRCB', 0), ('YCRCB', 1), ('YCRCB', 2)]
     })
-
     # 2. Single channels (especially useful ones)
     channel_combinations.append({
         'name': 'GRAY',
@@ -251,7 +253,6 @@ def generate_channel_configurations() -> Iterator[dict]:
         'name': 'YCRCB_Y',
         'channels': [('YCRCB', 0)]  # Luma
     })
-
     # 3. Interesting cross-color-space combinations
     channel_combinations.append({
         'name': 'RGB+HSV_H',
@@ -282,8 +283,34 @@ def generate_channel_configurations() -> Iterator[dict]:
         'channels': [('HSV', 1), ('HSV', 2)]  # Saturation + Value
     })
 
+    for thr in [10, 15, 20, 25, 30]:
+        for pixel_border in [5, 10, 15, 20, 25]:
+            for gradient_threshold in [0.05, 0.1, 0.15, 0.20, 0.25]:
+                channel_combinations.append({
+                    'name': 'TEAM2',
+                    'channels':  [],
+                    'thr': thr,
+                    'pixel_border': pixel_border,
+                    'gradient_threshold': gradient_threshold,
+                })
+
+
+
+
     # Generate all combinations
     for combo in channel_combinations:
+        if combo['name'] == 'TEAM2':
+            yield {
+                'name': combo['name'],
+                'channels': combo['channels'],
+                'threshold': combo['thr'],
+                'thr': combo['thr'],
+                'pixel_border': combo['pixel_border'],
+                'gradient_threshold': combo['gradient_threshold'],
+                'description': f"{combo['name']}, thr = {combo['thr']}, pixel_border = {combo['pixel_border']}, gradient_threshold = {combo['gradient_threshold']}"
+            }
+            continue
+
         for threshold in thresholds:
             yield {
                 'name': combo['name'],
@@ -516,8 +543,11 @@ if __name__ == '__main__':
                     # split_if_two_paintings returns images in RGB (it converts internally), so convert back
                     sub_bgr = cv2.cvtColor(sub_image, cv2.COLOR_RGB2BGR)
 
-                    # Compute mask for this subimage
-                    predicted_mask = variance_background_removal(sub_bgr, config)
+                    if config['name'] == 'TEAM2':
+                        predicted_mask = team2_segmentation.create_mask_from_gradient(image, thr=config['thr'], pixel_border=config['pixel_border'], gradient_threshold=config['gradient_threshold'])
+                    else:
+                        # Compute mask for this subimage
+                        predicted_mask = variance_background_removal(sub_bgr, config)
 
                     # Convert GT to binary (handle 3-channel or single-channel GT)
                     if len(gt_mask_sub.shape) == 3:
@@ -564,3 +594,88 @@ if __name__ == '__main__':
                   f"F1: {avg_metrics['f1_score']:.4f} | "
                   f"Precision: {avg_metrics['precision']:.4f} | "
                   f"Recall: {avg_metrics['recall']:.4f}")
+
+
+    # === Sort and summarize results ===
+    all_results.sort(key=lambda x: x['miou'], reverse=True)
+
+    print("\n" + "="*100)
+    print("TOP 10 CONFIGURATIONS (sorted by mIoU):")
+    print("="*100)
+    for i, result in enumerate(all_results[:10], 1):
+        print(f"{i:2d}. {result['config']:40s} | "
+              f"mIoU: {result['miou']:.4f} | "
+              f"F1: {result['f1_score']:.4f} | "
+              f"P: {result['precision']:.4f} | "
+              f"R: {result['recall']:.4f}")
+
+    # === Save results to CSV ===
+    import pandas as pd
+    df = pd.DataFrame(all_results)
+    csv_path = "background_removal_grid_search_results.csv"
+    df.to_csv(csv_path, index=False)
+    print(f"\n✅ Results saved to: {csv_path}")
+
+    # === Visualize best configuration ===
+    if visualize_best and all_results:
+        best_config = all_results[0]
+        print(f"\n{'='*100}")
+        print(f"Visualizing BEST configuration: {best_config['config']}")
+        print(f"{'='*100}")
+
+        # Reconstruct config dict
+        best_config_dict = None
+        for config in generate_channel_configurations():
+            if config["description"] == best_config["config"]:
+                best_config_dict = config
+                break
+
+        if best_config_dict:
+            for idx, query in enumerate(queries):
+                image = query["image"]
+                gt_mask = query["gt_mask"]
+                image_name = query["name"]
+
+                # --- Split if needed ---
+                splitted_images = split_if_two_paintings(image)
+                widths = [si.shape[1] for si in splitted_images]
+                cum_widths = np.cumsum([0] + widths)
+
+                for part_idx, sub_image in enumerate(splitted_images):
+                    # Compute corresponding GT region
+                    x_start = int(cum_widths[part_idx])
+                    x_end = int(cum_widths[part_idx + 1])
+
+                    if gt_mask.shape[1] == image.shape[1]:
+                        gt_mask_sub = gt_mask[:, x_start:x_end]
+                    else:
+                        gt_mask_sub = gt_mask
+
+                    sub_bgr = cv2.cvtColor(sub_image, cv2.COLOR_RGB2BGR)
+
+                    if best_config_dict['name'] == 'TEAM2':
+                        predicted_mask = team2_segmentation.create_mask_from_gradient(image, thr=best_config_dict['thr'], pixel_border=best_config_dict['pixel_border'], gradient_threshold=best_config_dict['gradient_threshold'])
+                    else:
+                        # Compute mask for this subimage
+                        predicted_mask = variance_background_removal(sub_bgr, best_config_dict)
+
+                    if len(gt_mask_sub.shape) == 3:
+                        gt_mask_binary = (gt_mask_sub[:, :, 0] > 127).astype(np.float32)
+                    else:
+                        gt_mask_binary = (gt_mask_sub > 127).astype(np.float32)
+
+                    # Resize predicted mask if needed
+                    if predicted_mask.shape != gt_mask_binary.shape:
+                        predicted_mask = cv2.resize(
+                            predicted_mask,
+                            (gt_mask_binary.shape[1], gt_mask_binary.shape[0]),
+                            interpolation=cv2.INTER_NEAREST,
+                        )
+
+                    # Visualize each sub-painting separately
+                    suffix = f"{image_name}_part{part_idx+1}_{best_config['name']}"
+                    output_path = visualize_masks(sub_bgr, predicted_mask, gt_mask_binary, suffix)
+                    print(f"  Saved: {output_path}")
+
+        else:
+            print("⚠️ Could not reconstruct best configuration — skipping visualization.")
