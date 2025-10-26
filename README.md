@@ -56,7 +56,7 @@ python query_by_sample.py dataset_path queries_path [params]
 python query_by_sample.py ./data/BBDD ./data/qsd1_w1
 
 # With multiple color spaces and custom parameters
-python query_by_sample.py ./data/BBDD ./data/qsd1_w1 --color_spaces LAB HSV --weight_strategy CENTER_CROP_10 --bins 64 --k 5
+python query_by_sample.py ./data/BBDD ./data/qsd1_w1 --color_spaces LAB HSV --k 5
 
 # Save results to pickle file
 python query_by_sample.py ./data/BBDD ./data/qsd1_w1 --pkl_output_path results.pkl --k 10
