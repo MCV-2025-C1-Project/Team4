@@ -102,7 +102,7 @@ This will save JSON files (one per configuration) with MAP@1 and MAP@5 results f
 ### Noise removal: `noise_removal.py`
 
 This script is used to detect and remove image noise. The solution is general, but in our project all the images have impulse noise, removed
-with different filter. It includes a bunch of batch testing and evaluation functions.
+with different filters. It includes a bunch of batch testing and evaluation functions.
 
 ## Filters available
 - **Median Filter** (default) - Best for salt & pepper noise, used with 3x3 kernel size
