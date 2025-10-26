@@ -175,10 +175,10 @@ RGB, HSV, LAB, YCrCb, HLS, CMYK, LUV, XYZ, YUV
   - `CropToMask`: Crops image to the bounding box of the mask
   - `Crop`: Crops image by a specified ratio from all sides
 
-- **`denoising.py`** - Advanced noise detection and removal
+- **`noise_removal.py`** - Advanced noise detection and removal
   - `detect_noise`: Automatically detects noise type (Gaussian, salt-and-pepper) and noise level using statistical analysis (kurtosis, SNR, variance)
   - `DenoiseWithNonLocalMeans`: Applies non-local means denoising when salt-and-pepper noise is detected
-  - `DenoiseWithMedianFilter`: Applies median filtering for noise reduction
+  - `DenoiseWithMedianFilter`: Applies median filtering for noise reduction(use 3x3 size for the best results)
 
 - **`color_conversion.py`** - Color space conversion utilities
   - `ColorSpace`: Enum supporting RGB, HSV, LAB, YCrCb, HLS, CMYK, LUV, XYZ, YUV
