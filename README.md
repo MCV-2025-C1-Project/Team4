@@ -31,23 +31,17 @@ python query_by_sample.py dataset_path queries_path [params]
 - `queries_path`
   Path to the queries directory. **(Required, positional argument)**
 
-- `--gamma`
-  Gamma correction factor. Default: `0.8`.
-
 - `--color_spaces`
   Color space(s) to use. Options: `RGB`, `HSV`, `LAB`, `YCRCB`, `HLS`, `CMYK`, `LUV`, `XYZ`, `YUV`. Default: `LAB`.
 
-- `--keep_or_discard`
-  String of 'K' (keep) or 'D' (discard) for each channel. Default: all 'K's.
-
-- `--weight_strategy`
-  Weighting strategy. Options: `PYRAMID`, `CENTER_CROP_05`, `CENTER_CROP_10`, `CENTER_CROP_15`. Default: `CENTER_CROP_15`.
-
-- `--bins`
-  Number of bins in histogram. Default: `32`.
-
 - `--distance`
   Distance function to use (e.g., `canberra_distance`, `l1_distance`, `euclidean_distance`). Default: `canberra_distance`.
+
+- `--generate_masks`
+  If present, indicates that it has to generate masks per each query image instead of using the full image.
+
+- `--multiple_paintings`
+  If present, indicates that there can be more than one painting per image, and the program tries to split them.
 
 - `--k`
   Number of top results to retrieve. Default: `10`.
@@ -105,16 +99,17 @@ python parameter_grid_search.py ./data/BBDD ./data/qsd1_w1 --results_folder resu
 This will save JSON files (one per configuration) with MAP@1 and MAP@5 results for all distance metrics.
 
 ### Mask generator: `wall_remover.py`
+
 Generates the mask for a set of images in a folder.
 
 #### Example
+
 ```bash
 python wall_remover.py
 ```
 
 In the file has to be specified the name of the folder where the images are.
 The script generates a set of .png masks on the same folder.
-
 
 ## Additional Details
 
@@ -149,24 +144,24 @@ RGB, HSV, LAB, YCrCb, HLS, CMYK, LUV, XYZ, YUV
 - `PYRAMID` - Pyramid-shaped weights from center
 - `CENTER_CROP_05/10/15` - Binary weights keeping center (5%, 10%, or 15% border discarded)
 
-
 ### Core Library (`libs_week2/`)
 
 - **`database.py`**
-    - The `Image` class now includes a `mask` attribute to handle image masks.
-    - The `ImageDatabase.load` method now loads an associated `.png` mask for each image if it exists. If no mask is found, a default mask of all white pixels is created.
-    - `compute_descriptors` now passes both the image and its corresponding mask to the descriptor maker.
+
+  - The `Image` class now includes a `mask` attribute to handle image masks.
+  - The `ImageDatabase.load` method now loads an associated `.png` mask for each image if it exists. If no mask is found, a default mask of all white pixels is created.
+  - `compute_descriptors` now passes both the image and its corresponding mask to the descriptor maker.
 
 - **`descriptor.py`**
-    - **Image Preprocessing**: `ImagePreprocessStep`:
-        - `ApplyGamma`: Adjusts the gamma of the image.
-        - `OpenMask`: Erodes the mask to remove noisy edges.
-        - `CropToMask`: Crops the image to the bounding box of the mask content.
-    - **Image Block Splitting**: 
-        - `ImageBlockSplitter`:
-          - `IdentityImageBlockSplitter`: Treats the entire image as a single block (the default).
-          - `GridImageBlockSplitter`: Divides the image into a grid of a specified shape (e.g., 2x2, 3x3).
-          - `PyramidImageBlockSplitter`: Creates a spatial pyramid by combining grids of different resolutions.
-    - **Multi-dimensional Histograms**:
-        - `Histogram1D`, `Histogram2D`, `Histogram3D`: Classes for computing histograms of different dimensionalities.
-    - **`ImageDescriptorMaker`**: Now it takes a `histogram_computer` and a `preprocess` pipeline as arguments. The `make_descriptor` method processes the image and mask through the preprocessing steps, generates the multi-channel color representation, and then uses the specified histogram computer to create the final descriptor.
+  - **Image Preprocessing**: `ImagePreprocessStep`:
+    - `ApplyGamma`: Adjusts the gamma of the image.
+    - `OpenMask`: Erodes the mask to remove noisy edges.
+    - `CropToMask`: Crops the image to the bounding box of the mask content.
+  - **Image Block Splitting**:
+    - `ImageBlockSplitter`:
+      - `IdentityImageBlockSplitter`: Treats the entire image as a single block (the default).
+      - `GridImageBlockSplitter`: Divides the image into a grid of a specified shape (e.g., 2x2, 3x3).
+      - `PyramidImageBlockSplitter`: Creates a spatial pyramid by combining grids of different resolutions.
+  - **Multi-dimensional Histograms**:
+    - `Histogram1D`, `Histogram2D`, `Histogram3D`: Classes for computing histograms of different dimensionalities.
+  - **`ImageDescriptorMaker`**: Now it takes a `histogram_computer` and a `preprocess` pipeline as arguments. The `make_descriptor` method processes the image and mask through the preprocessing steps, generates the multi-channel color representation, and then uses the specified histogram computer to create the final descriptor.
