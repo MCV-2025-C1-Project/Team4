@@ -98,6 +98,35 @@ python parameter_grid_search.py ./data/BBDD ./data/qsd1_w1 --results_folder resu
 
 This will save JSON files (one per configuration) with MAP@1 and MAP@5 results for all distance metrics.
 
+
+### Noise removal: `noise_removal.py`
+
+This script is used to detect and remove image noise. The solution is general, but in our project all the images have impulse noise, removed
+with different filter. It includes a bunch of batch testing and evaluation functions.
+
+## Filters available
+- **Median Filter** (default) - Best for salt & pepper noise, used with 3x3 kernel size
+- **Adaptive Median** - Heavy impulse noise, works just in some images
+- **Bilateral** - Edge-preserving smoothing
+- **Non-Local Means** - High quality, slower
+- **Morphological** - Binary noise patterns
+- **Cascaded** - Multi-stage, applies 3 filters gradually
+
+## Workflow
+
+In the main method of the script you can select different functions, depending on the
+task you want to do.
+
+1. **Analyze**: Run noise detection to understand your dataset and see the metrics(kurtosis value, snr, impuls ratio)
+2. **Evaluate**: Test denoising quality with ground truth
+3. **Optimize**: Run grid search to find best parameters across all methods
+4. **Deploy**: Process your final image set or just a specific image with a specified filter
+   
+## Output
+- Denoised images in specified output folder
+- JSON files with detailed metrics
+
+
 ### Mask generator: `wall_remover.py`
 
 Generates the mask for a set of images in a folder.
@@ -175,10 +204,10 @@ RGB, HSV, LAB, YCrCb, HLS, CMYK, LUV, XYZ, YUV
   - `CropToMask`: Crops image to the bounding box of the mask
   - `Crop`: Crops image by a specified ratio from all sides
 
-- **`noise_removal.py`** - Advanced noise detection and removal
+- **`denoised.py`** - Advanced noise detection and removal
   - `detect_noise`: Automatically detects noise type (Gaussian, salt-and-pepper) and noise level using statistical analysis (kurtosis, SNR, variance)
   - `DenoiseWithNonLocalMeans`: Applies non-local means denoising when salt-and-pepper noise is detected
-  - `DenoiseWithMedianFilter`: Applies median filtering for noise reduction(use 3x3 size for the best results)
+  - `DenoiseWithMedianFilter`: Applies median filtering for noise reduction
 
 - **`color_conversion.py`** - Color space conversion utilities
   - `ColorSpace`: Enum supporting RGB, HSV, LAB, YCrCb, HLS, CMYK, LUV, XYZ, YUV
