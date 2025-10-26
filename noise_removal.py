@@ -11,7 +11,7 @@ import json
 
 
 
-#GPT SHIT ---------------------------------------------------
+#SOME GPT FUNCTIONS USED FOR TESTING ---------------------------------------------------
 
 
 def apply_bilateral_filter(image, d=9, sigma_color=75, sigma_space=75):
@@ -360,6 +360,7 @@ def save_best_denoised_images(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_
     """
     Apply best denoising method for each image and save results.
     Automatically selects the best method based on noise type.
+    Also saves metrics to a JSON file for comparison.
     
     Args:
         noisy_folder: Path to noisy images
@@ -374,6 +375,9 @@ def save_best_denoised_images(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_
     print("="*80)
     
     methods_to_test = ['median', 'adaptive', 'bilateral', 'nlm', 'morphological', 'cascaded']
+    
+    # Store metrics for each image
+    metrics_data = []
     
     for i in range(num_images):
         noisy_path = f"{noisy_folder}/{i:05d}.jpg"
@@ -396,6 +400,23 @@ def save_best_denoised_images(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_
             # No noise, save original
             cv2.imwrite(output_path, noisy)
             print(f"Image {i:05d}: No noise detected, saved original")
+            
+            # Still calculate metrics if clean image exists
+            if clean is not None:
+                psnr_noisy = psnr(clean, noisy)
+                ssim_noisy = ssim(clean, noisy, channel_axis=2, data_range=255)
+                
+                metrics_data.append({
+                    'image_id': i,
+                    'noise_type': 'none',
+                    'best_method': 'none',
+                    'original_psnr': float(psnr_noisy),
+                    'original_ssim': float(ssim_noisy),
+                    'denoised_psnr': float(psnr_noisy),
+                    'denoised_ssim': float(ssim_noisy),
+                    'psnr_gain': 0.0,
+                    'ssim_gain': 0.0
+                })
             continue
         
         # Test all methods and find the best one
@@ -414,15 +435,305 @@ def save_best_denoised_images(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_
                     best_method = method
                     best_denoised = denoised
         
-        # Save best result
-        if best_denoised is not None:
+        # Save best result and calculate metrics
+        if best_denoised is not None and clean is not None:
             cv2.imwrite(output_path, best_denoised)
-            print(f"Image {i:05d}: Noise={noise_info['noise_type']:<15} Best={best_method:<15} SSIM={best_ssim:.4f}")
+            
+            # Calculate metrics for original noisy image
+            psnr_noisy = psnr(clean, noisy)
+            ssim_noisy = ssim(clean, noisy, channel_axis=2, data_range=255)
+            
+            # Calculate metrics for denoised image
+            psnr_denoised = psnr(clean, best_denoised)
+            ssim_denoised = ssim(clean, best_denoised, channel_axis=2, data_range=255)
+            
+            # Calculate improvements
+            psnr_gain = psnr_denoised - psnr_noisy
+            ssim_gain = ssim_denoised - ssim_noisy
+            
+            metrics_data.append({
+                'image_id': i,
+                'noise_type': noise_info['noise_type'],
+                'best_method': best_method,
+                'original_psnr': float(psnr_noisy),
+                'original_ssim': float(ssim_noisy),
+                'denoised_psnr': float(psnr_denoised),
+                'denoised_ssim': float(ssim_denoised),
+                'psnr_gain': float(psnr_gain),
+                'ssim_gain': float(ssim_gain)
+            })
+            
+            print(f"Image {i:05d}: Noise={noise_info['noise_type']:<15} Best={best_method:<15} "
+                  f"PSNR: {psnr_noisy:.2f}→{psnr_denoised:.2f} (Δ{psnr_gain:+.2f}) "
+                  f"SSIM: {ssim_noisy:.4f}→{ssim_denoised:.4f} (Δ{ssim_gain:+.4f})")
         else:
             cv2.imwrite(output_path, noisy)
             print(f"Image {i:05d}: Failed to denoise, saved original")
     
+    # Save metrics to JSON file
+    metrics_file = f"{output_folder}/denoising_metrics.json"
+    with open(metrics_file, 'w') as f:
+        json.dump(metrics_data, f, indent=2)
+    
+    # Calculate and print aggregate statistics
+    if metrics_data:
+        denoised_images = [m for m in metrics_data if m['noise_type'] != 'none']
+        if denoised_images:
+            avg_psnr_gain = np.mean([m['psnr_gain'] for m in denoised_images])
+            avg_ssim_gain = np.mean([m['ssim_gain'] for m in denoised_images])
+            avg_psnr_original = np.mean([m['original_psnr'] for m in denoised_images])
+            avg_psnr_denoised = np.mean([m['denoised_psnr'] for m in denoised_images])
+            avg_ssim_original = np.mean([m['original_ssim'] for m in denoised_images])
+            avg_ssim_denoised = np.mean([m['denoised_ssim'] for m in denoised_images])
+            
+            print("\n" + "="*80)
+            print("AGGREGATE STATISTICS:")
+            print("="*80)
+            print(f"Images with noise detected: {len(denoised_images)}")
+            print(f"Average Original PSNR: {avg_psnr_original:.2f} dB")
+            print(f"Average Denoised PSNR: {avg_psnr_denoised:.2f} dB")
+            print(f"Average PSNR Gain: {avg_psnr_gain:+.2f} dB")
+            print(f"Average Original SSIM: {avg_ssim_original:.4f}")
+            print(f"Average Denoised SSIM: {avg_ssim_denoised:.4f}")
+            print(f"Average SSIM Gain: {avg_ssim_gain:+.4f}")
+            print("="*80)
+    
     print(f"\nBest denoised images saved to: {output_folder}/")
+    print(f"Metrics saved to: {metrics_file}")
+    
+    
+
+
+
+def visualize_single_denoising(image_id, noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_augmented", 
+                                method='median', show_metrics=True):
+    """
+    Apply denoising to a single image and display noisy vs denoised side by side.
+    
+    Args:
+        image_id: ID of the image to process (e.g., 5 for 00005.jpg)
+        noisy_folder: Path to noisy images
+        clean_folder: Path to clean reference images (optional, for metrics)
+        method: Denoising method to use ('median', 'adaptive', 'bilateral', 'nlm', 'morphological', 'cascaded')
+        show_metrics: Whether to display metrics on the image
+    """
+    import matplotlib.pyplot as plt
+    
+    # Load noisy image
+    noisy_path = f"{noisy_folder}/{image_id:05d}.jpg"
+    clean_path = f"{clean_folder}/{image_id:05d}.jpg"
+    
+    if not os.path.exists(noisy_path):
+        print(f"Error: Image {noisy_path} not found!")
+        return
+    
+    noisy = cv2.imread(noisy_path)
+    clean = cv2.imread(clean_path) if os.path.exists(clean_path) else None
+    
+    # Detect noise
+    noise_info = detect_noise(noisy)
+    
+    # Apply denoising
+    denoised = remove_noise(noisy, noise_info['noise_type'], method=method)
+    
+    # Convert BGR to RGB for matplotlib
+    noisy_rgb = cv2.cvtColor(noisy, cv2.COLOR_BGR2RGB)
+    denoised_rgb = cv2.cvtColor(denoised, cv2.COLOR_BGR2RGB)
+    
+    # Calculate metrics if clean image is available
+    metrics_text = ""
+    if clean is not None:
+        eval_result = evaluate_denoising(clean, noisy, denoised)
+        metrics_text = (
+            f"PSNR: {eval_result['noisy_metrics']['psnr']:.2f} → {eval_result['denoised_metrics']['psnr']:.2f} dB "
+            f"(Δ{eval_result['improvement']['psnr_gain']:+.2f})\n"
+            f"SSIM: {eval_result['noisy_metrics']['ssim']:.4f} → {eval_result['denoised_metrics']['ssim']:.4f} "
+            f"(Δ{eval_result['improvement']['ssim_gain']:+.4f})\n"
+            f"MSE Reduction: {eval_result['improvement']['mse_reduction_percent']:.1f}%"
+        )
+    
+    # Create visualization
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+    
+    # Noisy image
+    axes[0].imshow(noisy_rgb)
+    axes[0].set_title(f'Noisy Image {image_id:05d}\nDetected: {noise_info["noise_type"]}', 
+                     fontsize=12, fontweight='bold')
+    axes[0].axis('off')
+    
+    # Denoised image
+    axes[1].imshow(denoised_rgb)
+    axes[1].set_title(f'Denoised Image (Method: {method})', 
+                     fontsize=12, fontweight='bold')
+    axes[1].axis('off')
+    
+    # Add metrics text if available
+    if show_metrics and metrics_text:
+        fig.text(0.5, 0.02, metrics_text, ha='center', fontsize=10, 
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.tight_layout(rect=[0, 0.08, 1, 1] if show_metrics else [0, 0, 1, 1])
+    plt.show()
+    
+    return denoised
+
+def compare_methods_single_image(image_id, noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_augmented"):
+    """
+    Compare all denoising methods on a single image.
+    
+    Args:
+        image_id: ID of the image to process
+        noisy_folder: Path to noisy images
+        clean_folder: Path to clean reference images (for metrics)
+    """
+    import matplotlib.pyplot as plt
+    
+    methods = ['median', 'adaptive', 'bilateral', 'nlm', 'morphological', 'cascaded']
+    
+    # Load noisy image
+    noisy_path = f"{noisy_folder}/{image_id:05d}.jpg"
+    clean_path = f"{clean_folder}/{image_id:05d}.jpg"
+    
+    if not os.path.exists(noisy_path):
+        print(f"Error: Image {noisy_path} not found!")
+        return
+    
+    noisy = cv2.imread(noisy_path)
+    clean = cv2.imread(clean_path) if os.path.exists(clean_path) else None
+    
+    # Detect noise
+    noise_info = detect_noise(noisy)
+    
+    # Create figure with all methods
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.flatten()
+    
+    # Show original noisy image
+    noisy_rgb = cv2.cvtColor(noisy, cv2.COLOR_BGR2RGB)
+    axes[0].imshow(noisy_rgb)
+    axes[0].set_title(f'Noisy (Original)\n{noise_info["noise_type"]}', fontweight='bold')
+    axes[0].axis('off')
+    
+    # Apply each method and display
+    for idx, method in enumerate(methods, start=1):
+        denoised = remove_noise(noisy, noise_info['noise_type'], method=method)
+        denoised_rgb = cv2.cvtColor(denoised, cv2.COLOR_BGR2RGB);
+        
+        axes[idx].imshow(denoised_rgb)
+        
+        # Add metrics if clean image available
+        if clean is not None:
+            psnr_val = psnr(clean, denoised)
+            ssim_val = ssim(clean, denoised, channel_axis=2, data_range=255)
+            axes[idx].set_title(f'{method.upper()}\nPSNR: {psnr_val:.2f} | SSIM: {ssim_val:.4f}', 
+                              fontweight='bold')
+        else:
+            axes[idx].set_title(method.upper(), fontweight='bold')
+        
+        axes[idx].axis('off')
+    
+    # Hide unused subplot
+    axes[7].axis('off')
+    
+    plt.suptitle(f'Denoising Method Comparison - Image {image_id:05d}', 
+                fontsize=16, fontweight='bold', y=0.98)
+    plt.tight_layout()
+    plt.show()
+
+
+def denoise_specific_images(input_folder="qst1_w3", output_folder="qst1_w3_denoisedv2", 
+                           image_ids=[0,3,6,7,8,9,10,14,15,16,17,18,19,20,22,23,24,30,32,33,34,35,36,37,39,40,41,43,48]):
+    """
+    Denoise specific images from a folder and save results.
+    Applies median filter to all images.
+    
+    Args:
+        input_folder: Path to input images
+        output_folder: Path to save denoised images
+        image_ids: List of image IDs to process
+    
+    Returns:
+        Dictionary with processing results for each image
+    """
+    # Create output folder if it doesn't exist
+    os.makedirs(output_folder, exist_ok=True)
+    
+    print("="*80)
+    print(f"DENOISING SPECIFIC IMAGES FROM {input_folder}")
+    print("="*80)
+    
+    processing_results = []
+    
+    for img_id in image_ids:
+        input_path = f"{input_folder}/{img_id:05d}.jpg"
+        output_path = f"{output_folder}/{img_id:05d}.jpg"
+        
+        if not os.path.exists(input_path):
+            print(f"Warning: Image {input_path} not found, skipping...")
+            continue
+        
+        # Load image
+        image = cv2.imread(input_path)
+        
+        if image is None:
+            print(f"Warning: Failed to load {input_path}, skipping...")
+            continue
+        
+        # Detect noise (for information only)
+        noise_info = detect_noise(image)
+        
+        # Apply median filter to all images
+        denoised = apply_median_filter(image, kernel_size=3)
+        # denoised = apply_cascaded_filter(image, kernel_size=5)
+        method_used = 'median'
+
+        print(f"Image {img_id:05d}: Applied median filter")
+        print(f"  → Detected noise type: {noise_info['noise_type']}")
+        
+        # Save denoised image
+        cv2.imwrite(output_path, denoised)
+        
+        # Store processing info
+        processing_results.append({
+            'image_id': img_id,
+            'noise_type': noise_info['noise_type'],
+            'noise_level': noise_info['noise_level'],
+            'method_used': method_used,
+            'kurtosis': float(noise_info['kurtosis']),
+            'noise_std': float(noise_info['noise_std']),
+            'snr': float(noise_info['snr']),
+            'confidence': float(noise_info['confidence'])
+        })
+        
+        print(f"  → Saved to {output_path}")
+        print(f"  → Noise STD: {noise_info['noise_std']:.4f}, SNR: {noise_info['snr']:.2f} dB")
+    
+    # Save processing info to JSON
+    info_file = f"{output_folder}/processing_info.json"
+    with open(info_file, 'w') as f:
+        json.dump(processing_results, f, indent=2)
+    
+    print("\n" + "="*80)
+    print(f"PROCESSING COMPLETE")
+    print(f"Denoised images saved to: {output_folder}/")
+    print(f"Processing info saved to: {info_file}")
+    print("="*80)
+    
+    # Print summary statistics
+    noise_types = {}
+    for result in processing_results:
+        noise_type = result['noise_type']
+        noise_types[noise_type] = noise_types.get(noise_type, 0) + 1
+    
+    print("\nSUMMARY:")
+    print(f"Total images processed: {len(processing_results)}")
+    print(f"Method applied: Median filter (kernel size 3) to ALL images")
+    print("Noise types detected (for information):")
+    for noise_type, count in noise_types.items():
+        print(f"  {noise_type}: {count} images")
+    
+    return processing_results
+
 #-----------------------------------------------------------------------------------------------GPT-END
 
 def apply_gaussian_filter(image, kernel_size=5, sigma=1.0):
@@ -560,6 +871,7 @@ def detect_noise(image, noise_threshold=0.045):
         confidence = 1.0
         noise_level = "none"
         
+    #QSD1-W3 ADJUSTED LOGIC
     elif impulse_ratio != 0.0:
         if ((kurtosis_val > 5.0 or (has_salt and has_pepper))) and snr < 4.0:
             noise_type = "salt_and_pepper"
@@ -573,7 +885,25 @@ def detect_noise(image, noise_threshold=0.045):
         # else:
         #     noise_type = "mixed"
         #     confidence = 0.5
-        
+        else:
+            noise_type = "none"
+    
+    # QSD2-W3 ADJUSTED LOGIC
+    # elif impulse_ratio != 0.0:
+    #     if ((kurtosis_val > 5.0 or (has_salt and has_pepper))) and snr < 4.5:
+    #         noise_type = "salt_and_pepper"
+    #         confidence = min(1.0, (kurtosis_val / 10.0) if kurtosis_val > 0 else 0.5)
+    #     elif -0.5 <= kurtosis_val < 5.0:
+    #         noise_type = "none"
+    #         confidence = 1.0 - abs(kurtosis_val) / 3.0
+    #     # elif kurtosis_val < -0.5:
+    #     #     noise_type = "uniform"
+    #     #     confidence = min(1.0, abs(kurtosis_val) / 2.0)
+    #     # else:
+    #     #     noise_type = "mixed"
+    #     #     confidence = 0.5
+    #     else:
+    #         noise_type = "none"
     # Adjusted thresholds for noise levels
     if noise_std < 0.025:
         noise_level = "very_low"
@@ -602,7 +932,7 @@ def detect_noise(image, noise_threshold=0.045):
 
 
 
-def remove_noise(image, noise_type, method='adaptive'):
+def remove_noise(image, noise_type, method='median'):
     
     if noise_type == "salt_and_pepper":
         if method == 'adaptive':
@@ -682,7 +1012,7 @@ def evaluate_dataset(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_augmented
         
         # Detect and remove noise
         noise_info = detect_noise(noisy)
-        denoised = remove_noise(noisy, noise_info['noise_type'], method='adaptive')
+        denoised = remove_noise(noisy, noise_info['noise_type'], method='median')
         
         # Evaluate
         eval_result = evaluate_denoising(clean, noisy, denoised)
@@ -717,19 +1047,19 @@ def evaluate_dataset(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_augmented
 
 if __name__ == "__main__":
     
-    # STEP 1: Test noise detection on sample images - Run it to see what images have noise and some infos
+    # # STEP 1: Test noise detection on sample images - Run it to see what images have noise and some infos
      for i in range(0, 30):
-        image = cv2.imread(f"qsd1_w3/{i:05d}.jpg")
+        image = cv2.imread(f"qsd2_w3/{i:05d}.jpg")
        
         result = detect_noise(image)
         print(f"Image {i:05d}: {result['noise_type']} - {result['snr']:.2f} dB - noise std: {result['noise_std']:.4f} kurtosis: {result['kurtosis']:.2f} ")
     
     
     
-    # STEP 2: Evaluate denoising on the whole dataset, and see the result for each image in the json file
+    # # STEP 2: Evaluate denoising on the whole dataset, and see the result for each image in the json file
     # results = evaluate_dataset()
     # # Optional: Save results to file
-    # with open('denoising_evaluationadaptive.json', 'w') as f:
+    # with open('denoising_evaluationTASK1.json', 'w') as f:
     #     json.dump(results, f, indent=2)
     
     
@@ -749,11 +1079,23 @@ if __name__ == "__main__":
     # with open('grid_search_comprehensive.json', 'w') as f:
     #     json.dump(comprehensive_results, f, indent=2, default=str)
     
-    # # Method 3: Save images with best method
+    # Method 3: Save images with best method
     # print("\n\n=== SAVING BEST DENOISED IMAGES ===")
     # save_best_denoised_images(output_folder="output_best_method")
     
     # print("\n" + "="*80)
     # print("ALL GRID SEARCH OPERATIONS COMPLETED")
     # print("="*80)
+    
+     # Method 4: View single image denoising
+    # visualize_single_denoising(image_id=6, method='median')
+    
+    # Method 5: Compare all methods on a single image
+    # compare_methods_single_image(image_id=6)
+    # print("\n=== DENOISING SPECIFIC IMAGES ===")
+    # results = denoise_specific_images(
+    #     input_folder="qst1_w3",
+    #     output_folder="qst1_w3_denoised",
+    #     image_ids=[0,3,6,7,8,9,10,14,15,16,17,18,19,20,22,23,24,30,32,33,34,35,36,37,39,40,41,43,48]
+    # )
 
