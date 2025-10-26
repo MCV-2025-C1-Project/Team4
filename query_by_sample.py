@@ -1,19 +1,25 @@
 import argparse
 import os
 from typing import Any
-from libs_week2.average_precision import mapk
+
+import grid_background_removal_week3
+from libs_week3.average_precision import mapk
 import cv2
 import numpy as np
-from libs_week2.database import ImageDatabase
-from libs_week2.descriptor import (
+
+from libs_week3.color_conversion import ColorConversion
+from libs_week3.database import ImageDatabase
+from libs_week3.descriptor import (
     ColorSpace, ImageDescriptorMaker,
     Histogram1D, IdentityImageBlockSplitter, GridImageBlockSplitter,
-    Preprocess, OpenMask, CropToMask, ApplyGamma
 )
-import libs_week2.distances as distances
+import libs_week3.distances as distances
 from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle
+
+from libs_week3.descriptor import DCTDescriptor
+from libs_week3.preprocessing import Preprocess, CropToMask
 
 
 def variance_background_removal(image: np.ndarray, ):
@@ -104,20 +110,17 @@ def parse_arguments():
     parser.add_argument("dataset_path", type=str)  # Dataset directory path.
     parser.add_argument("queries_path", type=str)  # Queries directory path.
 
-    parser.add_argument("--gamma", type=float, default=0.8)  # Gamma correction factor.
-    parser.add_argument("--color_spaces", type=parse_colorspace, nargs='+', default=[ColorSpace.LAB])
-    parser.add_argument("--bins", type=int, default=32)  # Number of bins in histogram.
-    parser.add_argument("--distance", type=parse_distance, default=distances.l1_distance)
-    parser.add_argument("--remove_side_ratio", type=float, default=0.0)  # Preprocessing: remove edges (0.15 = 15%)
-    parser.add_argument("--grid_split", type=int, nargs=2, default=[4, 4])  # Grid split (e.g., 2 2 for 2x2)
+    parser.add_argument("--color_spaces", type=parse_colorspace, nargs='+', default=[ColorSpace.RGB])
+    parser.add_argument("--distance", type=parse_distance, default=distances.canberra_distance)
     parser.add_argument("--k", type=int, default=10)  # Number of top results to retrieve.
     parser.add_argument("--pkl_output_path", type=str, default=None)  # Output path for pickled predictions.
     parser.add_argument("--generate_masks", default=False, action='store_true')  # Output path for pickled predictions.
+    parser.add_argument("--multiple_paintings", default=False, action='store_true')  # Output path for pickled predictions.
 
     return parser.parse_args()
 
 # Load query images and ground truth from the provided queries_path.
-def load_queries(queries_path: str, gen_mask=False):
+def load_queries(queries_path: str, multiple_paintings=False, generate_masks=False) -> tuple[list[dict[str, Any]], list[list[int]]]:
     queries = []
     gt_path = os.path.join(queries_path, "gt_corresps.pkl")
     if os.path.exists(gt_path):
@@ -133,29 +136,50 @@ def load_queries(queries_path: str, gen_mask=False):
         image = cv2.imread(image_path)
 
         # Load mask if available, otherwise create full white mask
-        # if gen_mask:
-        #     mask = generate_mask(image)
-        # else:
-        #     mask_path = Path(image_path).with_suffix('.png')
-        #     if mask_path.exists():
-        #         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-        #     else:
-        #         mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
-
         mask_path = Path(image_path).with_suffix('.png')
         if mask_path.exists():
             mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
         else:
+            # Use full white mask for queries without mask
             mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
 
+        if multiple_paintings:
+            imgs = grid_background_removal_week3.split_if_two_paintings(image)
+        else:
+            imgs = [image]
+
+        if generate_masks:
+            config = {
+                'name': 'HSV_SV',
+                'channels': [('HSV', 1), ('HSV', 2)],  # Saturation + Value,
+                'threshold': 0.005,
+            }
+            masks = [grid_background_removal_week3.variance_background_removal(image, config).astype(np.uint8) * 255 for image in imgs]
+        else:
+            masks = [np.ones(image.shape[:2], dtype=np.uint8) * 255 for image in imgs]
+
+
+        # Add each query image with its filename, ground truth id, and mask
         queries.append({
-            'image': image,
-            'mask': mask,
+            'images': imgs,
+            'masks': masks,
             'name': filename,
             'id': int(Path(image_path).stem)
         })
-
     return queries, gt
+
+def prepare_gt_and_results_for_mapk(gt: list[list[int]], results: list[list[list[int]]]):
+    new_gt = []
+    new_results = []
+    for gt_item, res_item in zip(gt, results):
+        assert len(gt_item) == len(res_item)
+        for id, topk in zip(gt_item, res_item):
+            new_gt.append([id])
+            new_results.append(topk)
+
+    return new_gt, new_results
+
+
 
 # Display the query image and its corresponding results.
 def show_results(query, results):
@@ -177,46 +201,36 @@ def main():
     print("Loading database...")
     database = ImageDatabase.load(args.dataset_path)  # Load the image database.
     print("Loading queries...")
-    queries, ground_truth = load_queries(args.queries_path, args.generate_masks)  # Load query images and ground truth.
+    queries, ground_truth = load_queries(args.queries_path, args.multiple_paintings, args.generate_masks)  # Load query images and ground truth.
 
     print("Setting up descriptor maker...")
-    print(f"  Bins: {args.bins}")
     print(f"  Color Spaces: {[cs.value for cs in args.color_spaces]}")
     print(f"  Preprocessing: CropToMask")
     print(f"  Distance: {args.distance.__name__ if hasattr(args.distance, '__name__') else 'custom'}")
-    print(f"  Gamma: {args.gamma}")
 
     # Count total channels
     total_channels = sum(4 if cs == ColorSpace.CMYK else 3 for cs in args.color_spaces)
     all_channels = list(range(total_channels))
 
-    # Setup block splitter
-    if args.grid_split:
-        block_splitter = GridImageBlockSplitter(tuple(args.grid_split))
-        print(f"  Block splitter: Grid {tuple(args.grid_split)}")
-    else:
-        block_splitter = IdentityImageBlockSplitter()
-        print(f"  Block splitter: Identity (no splitting)")
+    block_splitter = IdentityImageBlockSplitter()
 
     # Setup histogram computer (Histogram1D)
-    histogram_computer = Histogram1D(
+    histogram_computer = DCTDescriptor(
         channels=all_channels,
-        bins=args.bins,
-        weight_strategy=None,
+        n_coeffs=120,
         block_splitter=block_splitter,
-        range_=None
     )
 
     # Setup preprocessing: Gamma -> OpenMask -> CropToMask
     preprocess = Preprocess([
         CropToMask(),
-        ApplyGamma(gamma=args.gamma),
+        # ApplyGamma(gamma=args.gamma),
         # OpenMask(remove_side_ratio=0.15),
     ])
 
     # Create descriptor maker
     descriptor_maker = ImageDescriptorMaker(
-        color_spaces=args.color_spaces,
+        color_conversion=ColorConversion(args.color_spaces, normalize=False),
         histogram_computer=histogram_computer,
         preprocess=preprocess
     )
@@ -230,24 +244,32 @@ def main():
     print("Querying...")
     results = []
     for query in queries:
-        query_descriptor = descriptor_maker.make_descriptor(query['image'], query['mask'])
-        descriptors.append(query_descriptor)
-        top_k = database.query(query_descriptor, args.distance, k=args.k)  # Retrieve top-k nearest images.
-        results.append(top_k)
+        query_descriptors = []
+        top_ks = []
+        for img, mask in zip(query['images'], query['masks']):
+            painting_descriptor = descriptor_maker.make_descriptor(img, mask)
+            query_descriptors.append(painting_descriptor)
+            top_k = database.query(painting_descriptor, args.distance, k=args.k)  # Retrieve top-k nearest images.
+            top_ks.append(top_k)
+        descriptors.append(query_descriptors)
+        results.append(top_ks)
 
     if ground_truth is not None:
         print("Ground truth is present: evaluating...")
-        clean_results = [[image.id for image in top_k] for top_k in results]
-        mapk1 = mapk(ground_truth, clean_results, k=1)  # Compute map@1 metric.
+        clean_results = [[[image.id for image in top_k] for top_k in image_results] for image_results in results]
+
+        map_gt, map_res = prepare_gt_and_results_for_mapk(ground_truth, clean_results)
+
+        mapk1 = mapk(map_gt, map_res, k=1)  # Compute map@1 metric.
         print(f"map@k=1 is {mapk1:.5f}")
         if args.k >= 5:
-            mapk5 = mapk(ground_truth, clean_results, k=5)  # Compute map@5 metric.
+            mapk5 = mapk(map_gt, map_res, k=5)  # Compute map@5 metric.
             print(f"map@k=5 is {mapk5:.5f}")
 
     # Generate a pickle file with the predictions if output path is provided.
     if args.pkl_output_path:
         print("Dumping predictions pkl...")
-        clean_results = [[image.id for image in top_k] for top_k in results]
+        clean_results = [[[image.id for image in top_k] for top_k in image_results] for image_results in results]
         queries_indexes = [[query['id']] for query in queries]
         pkl_content = [queries_indexes, clean_results]
 

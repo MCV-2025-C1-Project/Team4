@@ -67,14 +67,19 @@ def split_if_two_paintings(img: np.ndarray, debug=False, grad_valley_thresh=8.5,
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
+        cv2.imshow("Grad magnitude", (grad_mag - grad_mag.min()) / (grad_mag.max() - grad_mag.min()))
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+
         plt.figure(figsize=(10,4))
         plt.plot(profile_norm, label="Smoothed column gradient profile")
         plt.axvline(split_col, color='r', linestyle='--', label=f"Candidate split @ {split_col}")
         plt.title(f"Valley min={min_val:.2f}, side mean={mean_side:.2f}, Two paintings={is_two}")
         plt.legend()
-        plt.waitforbuttonpress()
-        plt.close()
-        # plt.show()
+        # plt.waitforbuttonpress()
+        # plt.close()
+        plt.show()
 
         img_show = img.copy()
         cv2.line(img_show, (split_col, 0), (split_col, h), (255, 0, 0), 3)
@@ -527,7 +532,8 @@ def load_queries(queries_path: str):
 
 if __name__ == '__main__':
     dataset_folder = "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd2_w3_denoised"
-    dataset_folder = "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd2_w2"
+    test_dataset_folder = "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qst2_w3_denoised"
+    # dataset_folder = "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd2_w2"
 
     print(f"running {len(list(generate_channel_configurations()))} tests.")
 
@@ -668,6 +674,8 @@ if __name__ == '__main__':
                 break
 
         if best_config_dict:
+            # queries, _ = load_queries(test_dataset_folder)
+
             for idx, query in enumerate(queries):
                 image = query["image"]
                 gt_mask = query["gt_mask"]
@@ -677,6 +685,8 @@ if __name__ == '__main__':
                 splitted_images = split_if_two_paintings(image)
                 widths = [si.shape[1] for si in splitted_images]
                 cum_widths = np.cumsum([0] + widths)
+
+                generated_mask_parts = []
 
                 for part_idx, sub_image in enumerate(splitted_images):
                     # Compute corresponding GT region
@@ -696,6 +706,8 @@ if __name__ == '__main__':
                         # Compute mask for this subimage
                         predicted_mask = variance_background_removal(sub_bgr, best_config_dict)
 
+                    generated_mask_parts.append(predicted_mask)
+
                     if len(gt_mask_sub.shape) == 3:
                         gt_mask_binary = (gt_mask_sub[:, :, 0] > 127).astype(np.float32)
                     else:
@@ -713,6 +725,10 @@ if __name__ == '__main__':
                     suffix = f"{image_name}_part{part_idx+1}_{best_config['name']}"
                     output_path = visualize_masks(sub_bgr, predicted_mask, gt_mask_binary, suffix)
                     print(f"  Saved: {output_path}")
+
+                mask = np.hstack(generated_mask_parts)
+                name = "generated_masks/" + image_name.split(".")[0] + ".png"
+                cv2.imwrite(name, (mask * 255).astype(np.uint8))
 
         else:
             print("⚠️ Could not reconstruct best configuration — skipping visualization.")

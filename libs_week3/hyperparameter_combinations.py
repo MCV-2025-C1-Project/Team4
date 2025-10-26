@@ -281,7 +281,7 @@ def generate_texture_descriptor_computers(color_spaces: list[ColorSpace]) -> lis
         return int(diag * (diag + 1) / 2)
     
     for channel in channels:
-        for n_diags in range(1, 31):
+        for n_diags in range(2, 31):
             n_coeffs = diag_to_coeffs(n_diags)
             computer = descriptor.DCTDescriptor(channels=channel, n_coeffs=n_coeffs, block_splitter=IdentityImageBlockSplitter())
             computers.append(computer)
@@ -348,12 +348,17 @@ def actual_grid_size():
     distinct_histogram_types = set()
     distinct_histogram_channels = set()
     distinct_preprocess = set()
+    early_total = 0
+    for config in hyperparameter_grid_search():
+        early_total += 1
+
+    print(f"early total = {early_total}")
 
     for config in hyperparameter_grid_search():
         total += 1
 
         # Color spaces (convert list to tuple for hashing)
-        color_space_tuple = tuple(sorted([cs.value for cs in config['color_spaces']]))
+        color_space_tuple = tuple(sorted([cs.value for cs in config['color_conversion']]))
         distinct_color_spaces.add(color_space_tuple)
 
         # Preprocessing (convert to string representation)

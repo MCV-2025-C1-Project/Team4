@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Callable, Self
 import cv2
 import numpy as np
+import tqdm
 
 from libs_week2.descriptor import ImageDescriptorMaker
 
@@ -26,7 +27,7 @@ class ImageDatabase:
             image.distance = None
 
     def compute_descriptors(self, descriptor_maker: ImageDescriptorMaker):
-        for image in self.images:
+        for image in tqdm.tqdm(self.images):
             image.descriptor = descriptor_maker.make_descriptor(image.image, image.mask)
 
     def query(self, query_descriptor: np.ndarray, distance: Callable[[np.ndarray, np.ndarray], float], k):
