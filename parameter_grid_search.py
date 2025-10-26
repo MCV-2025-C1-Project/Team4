@@ -1,9 +1,12 @@
 import argparse
 import os
+from os.path import split
 from typing import Any
 import cv2
 import numpy as np
 import time
+
+import grid_background_removal_week3
 from libs_week3 import denoising
 from libs_week3.average_precision import mapk
 from libs_week3.database import ImageDatabase
@@ -28,7 +31,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def load_queries(queries_path: str) -> tuple[list[dict[str, Any]], list[list[int]]]:
+def load_queries(queries_path: str, multiple_paintings=True, generate_masks=True) -> tuple[list[dict[str, Any]], list[list[int]]]:
     queries = []
     # Load ground truth correspondences
     with open(os.path.join(queries_path, "gt_corresps.pkl"), 'rb') as f:
@@ -48,10 +51,26 @@ def load_queries(queries_path: str) -> tuple[list[dict[str, Any]], list[list[int
             # Use full white mask for queries without mask
             mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
 
+        if multiple_paintings:
+            imgs = grid_background_removal_week3.split_if_two_paintings(image)
+        else:
+            imgs = [image]
+
+        if generate_masks:
+            config = {
+                'name': 'HSV_SV',
+                'channels': [('HSV', 1), ('HSV', 2)],  # Saturation + Value,
+                'threshold': 0.005,
+            }
+            masks = [grid_background_removal_week3.variance_background_removal(image, config).astype(np.uint8) * 255 for image in imgs]
+        else:
+            masks = [np.ones(image.shape[:2], dtype=np.uint8) * 255 for image in imgs]
+
+
         # Add each query image with its filename, ground truth id, and mask
         queries.append({
-            'image': image,
-            'mask': mask,
+            'images': imgs,
+            'masks': masks,
             'name': filename,
             'gt': int(Path(image_path).stem)
         })
@@ -81,6 +100,18 @@ def save_results_for_descriptor(folder: str, iteration: int, results: list[dict]
     with open(filepath, 'w') as f:
         json.dump(results, f, indent=4)
 
+def prepare_gt_and_results_for_mapk(gt: list[list[int]], results: list[list[list[int]]]):
+    new_gt = []
+    new_results = []
+    for gt_item, res_item in zip(gt, results):
+        assert len(gt_item) == len(res_item)
+        for id, topk in zip(gt_item, res_item):
+            new_gt.append([id])
+            new_results.append(topk)
+
+    return new_gt, new_results
+
+
 
 def main():
     args = parse_arguments()
@@ -94,9 +125,9 @@ def main():
     print("Loading queries..")
     queries, ground_truth = load_queries(args.queries_path)
     
-    denoise = denoising.DenoiseWithMedianFilter(kernel_size=3)
-    for query in queries:
-        query['image'], query['mask'] = denoise(query['image'], query['mask'])
+    # denoise = denoising.DenoiseWithMedianFilter(kernel_size=3)
+    # for query in queries:
+    #     query['image'], query['mask'] = denoise(query['image'], query['mask'])
 
     # Iterate over hyperparameter settings
     for i, params in enumerate(hyperparameter_grid_search()):
@@ -122,7 +153,10 @@ def main():
         # Time query descriptor computation
         start_time = time.time()
         for query in queries:
-            query['descriptor'] = descriptor_maker.make_descriptor(query['image'], query['mask'])
+            query['descriptors'] = []
+            for img, mask in zip(query['images'], query['masks']):
+                query['descriptors'].append(descriptor_maker.make_descriptor(img, mask))
+
         queries_descriptor_time = time.time() - start_time
 
         print(f"Descriptor computation times:")
@@ -138,13 +172,18 @@ def main():
             start_time = time.time()
             results_top_5 = []
             for query in queries:
-                top_5 = database.query(query['descriptor'], distance, k=5)
-                results_top_5.append([im.id for im in top_5])
+                image_results = []
+                for descriptor in query['descriptors']:
+                    top_5 = database.query(descriptor, distance, k=5)
+                    image_results.append([im.id for im in top_5])
+                results_top_5.append(image_results)
             distance_computation_time = time.time() - start_time
 
+            map_gt, map_top_5 = prepare_gt_and_results_for_mapk(ground_truth, results_top_5)
+
             # Compute evaluation metrics
-            map5 = mapk(ground_truth, results_top_5, k=5)
-            map1 = mapk(ground_truth, results_top_5, k=1)
+            map5 = mapk(map_gt, map_top_5, k=5)
+            map1 = mapk(map_gt, map_top_5, k=1)
             print(params, distance_name, map1, map5)
             print(f"  {distance_name}: map@k1={map1:.4f}, map@k5={map5:.4f}, time={distance_computation_time:.2f}s")
 

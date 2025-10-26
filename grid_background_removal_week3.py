@@ -92,36 +92,72 @@ def split_if_two_paintings(img: np.ndarray, debug=False, grad_valley_thresh=8.5,
     return [left_img, right_img]
 
 
+import cv2
+import numpy as np
+
 def convert_to_colorspace(image: np.ndarray, colorspace: str) -> np.ndarray:
     """
     Convert BGR image to specified color space.
-    Returns normalized image in [0, 1] range.
+    Ensures output is normalized to [0, 1] using known channel ranges for each color space.
     """
     image_float = image.astype(np.float32) / 255.0
 
     if colorspace == 'BGR':
-        return image_float
+        converted = image_float
+        ranges = [(0, 1)] * 3
+
     elif colorspace == 'RGB':
-        return cv2.cvtColor(image_float, cv2.COLOR_BGR2RGB)
+        converted = cv2.cvtColor(image_float, cv2.COLOR_BGR2RGB)
+        ranges = [(0, 1)] * 3
+
     elif colorspace == 'GRAY':
         gray = cv2.cvtColor(image_float, cv2.COLOR_BGR2GRAY)
-        return np.expand_dims(gray, axis=2)
+        converted = np.expand_dims(gray, axis=2)
+        ranges = [(0, 1)]
+
     elif colorspace == 'HSV':
-        return cv2.cvtColor(image_float, cv2.COLOR_BGR2HSV)
+        # OpenCV HSV: H ∈ [0, 180], S,V ∈ [0, 1]
+        converted = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2HSV).astype(np.float32)
+        ranges = [(0, 180), (0, 255), (0, 255)]
+
     elif colorspace == 'LAB':
-        return cv2.cvtColor(image_float, cv2.COLOR_BGR2LAB)
+        # L ∈ [0, 100], a,b ∈ [-128, 127]
+        converted = cv2.cvtColor(image, cv2.COLOR_BGR2LAB).astype(np.float32)
+        ranges = [(0, 100), (-128, 127), (-128, 127)]
+
     elif colorspace == 'LUV':
-        return cv2.cvtColor(image_float, cv2.COLOR_BGR2LUV)
+        # L ∈ [0, 100], u,v ∈ [-134, 220] (approx)
+        converted = cv2.cvtColor(image, cv2.COLOR_BGR2Luv).astype(np.float32)
+        ranges = [(0, 100), (-134, 220), (-134, 220)]
+
     elif colorspace == 'YCRCB':
-        return cv2.cvtColor(image_float, cv2.COLOR_BGR2YCrCb)
+        # Y,Cr,Cb ∈ [0, 255]
+        converted = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb).astype(np.float32)
+        ranges = [(0, 255)] * 3
+
     elif colorspace == 'HLS':
-        return cv2.cvtColor(image_float, cv2.COLOR_BGR2HLS)
+        # H ∈ [0,180], L,S ∈ [0,255]
+        converted = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2HLS).astype(np.float32)
+        ranges = [(0, 180), (0, 255), (0, 255)]
+
     elif colorspace == 'YUV':
-        return cv2.cvtColor(image_float, cv2.COLOR_BGR2YUV)
+        # Y,U,V ∈ [0,255]
+        converted = cv2.cvtColor(image, cv2.COLOR_BGR2YUV).astype(np.float32)
+        ranges = [(0, 255)] * 3
+
     elif colorspace == 'XYZ':
-        return cv2.cvtColor(image_float, cv2.COLOR_BGR2XYZ)
+        # X,Y,Z ∈ [0,255] (OpenCV scaling)
+        converted = cv2.cvtColor(image, cv2.COLOR_BGR2XYZ).astype(np.float32)
+        ranges = [(0, 255)] * 3
+
     else:
         raise ValueError(f"Unknown colorspace: {colorspace}")
+
+    # Normalize channels to [0, 1] using fixed known ranges
+    for c, (lo, hi) in enumerate(ranges):
+        converted[..., c] = np.clip((converted[..., c] - lo) / (hi - lo), 0, 1)
+
+    return converted
 
 
 def variance_background_removal(image: np.ndarray, channel_config: dict):
@@ -491,6 +527,7 @@ def load_queries(queries_path: str):
 
 if __name__ == '__main__':
     dataset_folder = "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd2_w3_denoised"
+    dataset_folder = "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd2_w2"
 
     print(f"running {len(list(generate_channel_configurations()))} tests.")
 
