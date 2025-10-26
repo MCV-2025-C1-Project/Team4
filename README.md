@@ -165,3 +165,39 @@ RGB, HSV, LAB, YCrCb, HLS, CMYK, LUV, XYZ, YUV
   - **Multi-dimensional Histograms**:
     - `Histogram1D`, `Histogram2D`, `Histogram3D`: Classes for computing histograms of different dimensionalities.
   - **`ImageDescriptorMaker`**: Now it takes a `histogram_computer` and a `preprocess` pipeline as arguments. The `make_descriptor` method processes the image and mask through the preprocessing steps, generates the multi-channel color representation, and then uses the specified histogram computer to create the final descriptor.
+
+### Core Library (`libs_week3/`)
+
+- **`preprocessing.py`** - Enhanced image preprocessing pipeline
+  - `Preprocess`: Chain multiple preprocessing steps together
+  - `ApplyGamma`: Gamma correction for brightness adjustment
+  - `OpenMask`: Erodes mask boundaries to remove noisy edges
+  - `CropToMask`: Crops image to the bounding box of the mask
+  - `Crop`: Crops image by a specified ratio from all sides
+
+- **`denoising.py`** - Advanced noise detection and removal
+  - `detect_noise`: Automatically detects noise type (Gaussian, salt-and-pepper) and noise level using statistical analysis (kurtosis, SNR, variance)
+  - `DenoiseWithNonLocalMeans`: Applies non-local means denoising when salt-and-pepper noise is detected
+  - `DenoiseWithMedianFilter`: Applies median filtering for noise reduction
+
+- **`color_conversion.py`** - Color space conversion utilities
+  - `ColorSpace`: Enum supporting RGB, HSV, LAB, YCrCb, HLS, CMYK, LUV, XYZ, YUV
+  - `ColorConversion`: Preprocessing step for converting images to multiple color spaces
+  - `bgr_to_cmyk`: Custom CMYK conversion function
+
+- **`descriptor.py`** - Extended descriptor computation with texture features
+  - All histogram computers from week 2 (Histogram1D, 2D, 3D)
+  - **New texture descriptors**:
+    - `LBPHistogramDescriptor`: Local Binary Pattern histogram for texture analysis
+    - `DCTDescriptor`: Discrete Cosine Transform for texture/frequency features
+    - `WaveletDescriptor`: Discrete Wavelet Transform for multi-resolution texture analysis
+  - Weighting strategies: `PYRAMID`, `CONE`, `CENTER_CROP`
+  - Image block splitters: `IdentityImageBlockSplitter`, `GridImageBlockSplitter`, `PyramidImageBlockSplitter`
+
+- **`database.py`** - Image database management (similar to week 2 with mask support)
+
+- **`distances.py`** - Distance metrics for comparing descriptors
+
+- **`average_precision.py`** - MAP@k evaluation metrics
+
+- **`hyperparameter_combinations.py`** - Grid search parameter generation
