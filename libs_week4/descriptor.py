@@ -9,6 +9,8 @@ from skimage.feature import local_binary_pattern
 import pywt
 from skimage.feature import daisy
 
+# from cv2 import xfeatures2d
+
 from libs_week3.color_conversion import ColorConversion, ColorSpace
 from libs_week3.preprocessing import ImagePreprocessStep
 
@@ -209,7 +211,117 @@ class SIFTDescriptor(KeypointDescriptorMaker):
             "edge_threshold": self.edge_threshold,
             "sigma": self.sigma
         }
+class BRISKDescriptor(KeypointDescriptorMaker):
+    def __init__(self, thresh: int = 30, octaves: int = 3, pattern_scale: float = 1.0):
+        self.thresh = thresh
+        self.octaves = octaves
+        self.pattern_scale = pattern_scale
+        self.brisk = cv2.BRISK_create(thresh=thresh, octaves=octaves, patternScale=pattern_scale)
+        
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+        
+        keypoints, descriptors = self.brisk.detectAndCompute(gray, mask)
+        return keypoints, descriptors
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "BRISK",
+            "thresh": self.thresh,
+            "octaves": self.octaves,
+            "pattern_scale": self.pattern_scale
+        }
+    
+    
+class AKAZEDescriptor(KeypointDescriptorMaker):
+    def __init__(self, descriptor_type: int = cv2.AKAZE_DESCRIPTOR_MLDB, 
+                 descriptor_size: int = 0, 
+                 descriptor_channels: int = 3, 
+                 threshold: float = 0.001, 
+                 n_octaves: int = 4, 
+                 n_octave_layers: int = 4, 
+                 diffusivity: int = cv2.KAZE_DIFF_PM_G2):
+        
+        self.descriptor_type = descriptor_type
+        self.descriptor_size = descriptor_size
+        self.descriptor_channels = descriptor_channels
+        self.threshold = threshold
+        self.n_octaves = n_octaves
+        self.n_octave_layers = n_octave_layers
+        self.diffusivity = diffusivity
+        self.akaze = cv2.AKAZE_create(
+            descriptor_type=descriptor_type,
+            descriptor_size=descriptor_size,
+            descriptor_channels=descriptor_channels,
+            threshold=threshold,
+            nOctaves=n_octaves,
+            nOctaveLayers=n_octave_layers,
+            diffusivity=diffusivity
+        )
+        
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+        
+        keypoints, descriptors = self.akaze.detectAndCompute(gray, mask)
+        return keypoints, descriptors
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "AKAZE",
+            "descriptor_type": self.descriptor_type,
+            "descriptor_size": self.descriptor_size,
+            "descriptor_channels": self.descriptor_channels,
+            "threshold": self.threshold,
+            "n_octaves": self.n_octaves,
+            "n_octave_layers": self.n_octave_layers,
+            "diffusivity": self.diffusivity
+        }
 
+class SURFDescriptor(KeypointDescriptorMaker):
+    """
+    Note: SURF is part of the opencv-contrib-python package. 
+    Ensure you have it installed for this class to work.
+    """
+    def __init__(self, hessian_threshold: float = 100, n_octaves: int = 4, 
+                 n_octave_layers: int = 3, extended: bool = False, upright: bool = False):
+        self.hessian_threshold = hessian_threshold
+        self.n_octaves = n_octaves
+        self.n_octave_layers = n_octave_layers
+        self.extended = extended
+        self.upright = upright
+        self.surf = xfeatures2d.SURF_create(
+            hessianThreshold=hessian_threshold,
+            nOctaves=n_octaves,
+            nOctaveLayers=n_octave_layers,
+            extended=extended,
+            upright=upright
+        )
+
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+            
+        keypoints, descriptors = self.surf.detectAndCompute(gray, mask)
+        return keypoints, descriptors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "SURF",
+            "hessian_threshold": self.hessian_threshold,
+            "n_octaves": self.n_octaves,
+            "n_octave_layers": self.n_octave_layers,
+            "extended": self.extended,
+            "upright": self.upright
+        }
+    
 
 class DescriptorMatcher:
     
