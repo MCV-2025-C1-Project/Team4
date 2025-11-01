@@ -14,7 +14,6 @@ from sklearn.decomposition import PCA
 from libs_week3.color_conversion import ColorConversion, ColorSpace
 from libs_week3.preprocessing import ImagePreprocessStep
 
-
 def flatten_list(l):
     res = []
 
@@ -486,7 +485,7 @@ class HOGDescriptor(KeypointDescriptorMaker):
         if not keypoints:
             return [], np.array([])
         
-        locations = [kp.pt for kp in keypoints]
+        locations = [(round(kp.pt[0]), round(kp.pt[1])) for kp in keypoints]
         
 
         descriptors = self.hog.compute(gray, locations=locations)
@@ -696,8 +695,81 @@ class DescriptorMatcher:
         
 
 if __name__ == "__main__":
-    pass
     
+    print("--- Creating a dummy image for testing ---")
+    # Create a 480x640 float image [0,1]
+    # The descriptor classes handle the conversion to uint8 [0,255]
+    dummy_image = np.zeros((480, 640), dtype=np.float32)
+    
+    # Add some features for the detectors to find
+    cv2.circle(dummy_image, (100, 100), 30, 0.8, -1)
+    cv2.circle(dummy_image, (300, 250), 50, 0.6, -1)
+    cv2.circle(dummy_image, (500, 400), 20, 0.9, -1)
+    
+    print(f"Dummy image created with shape: {dummy_image.shape}")
 
+    # --- 1. Test PCASIFTDescriptor ---
+    print("\n--- Testing PCASIFTDescriptor ---")
+    try:
+        # Note: This class uses the "flawed" PCA logic as implemented
+        # We use n_features=500 to ensure we get enough keypoints
+        # to be more than num_components (36)
+        pca_sift = PCASIFTDescriptor(num_components=24, n_features=500)
+        
+        keypoints_pca, descriptors_pca = pca_sift.detect_and_compute(dummy_image)
+        
+        print(f"Detected {len(keypoints_pca)} keypoints.")
+        if descriptors_pca is not None and descriptors_pca.shape[0] > 0:
+            print(f"Computed PCA-SIFT descriptors with shape: {descriptors_pca.shape}")
+            print(f"(Expected second dimension: {pca_sift.num_components})")
+        else:
+            print("No PCA-SIFT descriptors computed.")
+        
+        # print(f"Descriptor params: {pca_sift.to_dict()}")
 
+    except Exception as e:
+        print(f"PCASIFTDescriptor FAILED. Error: {e}")
+        print("This might be because 'cv2.SIFT_create' is not available.")
+        print("Please ensure you have a modern OpenCV or 'opencv-contrib-python'.")
+
+    # --- 2. Test HOGDescriptor ---
+    print("\n--- Testing HOGDescriptor ---")
+    try:
+        # HOG uses a SIFT detector internally per the class implementation
+        hog_desc = HOGDescriptor(n_features=500)
+        
+        keypoints_hog, descriptors_hog = hog_desc.detect_and_compute(dummy_image)
+        
+        print(f"Detected {len(keypoints_hog)} keypoints (using SIFT detector).")
+        if descriptors_hog is not None and descriptors_hog.shape[0] > 0:
+            print(f"Computed HOG descriptors with shape: {descriptors_hog.shape}")
+        else:
+            print("No HOG descriptors computed.")
+        
+        # print(f"Descriptor params: {hog_desc.to_dict()}")
+
+    except Exception as e:
+        print(f"HOGDescriptor FAILED. Error: {e}")
+        print("This might be because the internal SIFT detector failed.")
+
+    # --- 3. Test ArticleGLOHDescriptor ---
+    print("\n--- Testing ArticleGLOHDescriptor ---")
+    try:
+        # This also uses a SIFT detector internally
+        gloh_desc = GLOHDescriptor(nbins=36, n_features=500)
+        
+        keypoints_gloh, descriptors_gloh = gloh_desc.detect_and_compute(dummy_image)
+        
+        print(f"Detected {len(keypoints_gloh)} keypoints (using SIFT detector).")
+        if descriptors_gloh is not None and descriptors_gloh.shape[0] > 0:
+            print(f"Computed 'ArticleGLOH' descriptors with shape: {descriptors_gloh.shape}")
+            print(f"(Expected second dimension: {gloh_desc.nbins})")
+        else:
+            print("No 'GLOH' descriptors computed.")
+        
+        # print(f"Descriptor params: {gloh_desc.to_dict()}")
+
+    except Exception as e:
+        print(f"ArticleGLOHDescriptor FAILED. Error: {e}")
+        print("This might be because the internal SIFT detector failed.")
         
