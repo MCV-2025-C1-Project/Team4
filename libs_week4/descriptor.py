@@ -7,6 +7,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from skimage.feature import local_binary_pattern
 import pywt
+from skimage.feature import daisy
 
 from libs_week3.color_conversion import ColorConversion, ColorSpace
 from libs_week3.preprocessing import ImagePreprocessStep
@@ -138,75 +139,131 @@ class ORBDescriptor(KeypointDescriptorMaker):
             "n_levels": self.n_levels
         }
 
-
-
-
-
-
-# if __name__ == "__main__":
+class DaisyDescriptor(KeypointDescriptorMaker):
+    def __init__(self, step: int = 4, radius: int = 15, rings: int = 3, histograms: int = 8, orientations: int = 8):
+        self.step = step
+        self.radius = radius
+        self.rings = rings
+        self.histograms = histograms
+        self.orientations = orientations
+        
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+        
+        descriptor = daisy(gray, step=self.step, radius=self.radius, rings=self.rings, histograms=self.histograms, orientations=self.orientations, visualize=False)
+        
+        rows, cols, desc_dim = descriptor.shape
+        
+        keypoints = []
+        descriptors = []
+        
+        for r in range(rows):
+            for c in range(cols):
+                keypoint = cv2.KeyPoint(x=c * self.step, y=r * self.step, size=float(self.radius))
+                keypoints.append(keypoint)
+                descriptors.append(descriptor[r, c, :])
+        
+        if len(descriptors) == 0:
+            return [], None
+        
+        descriptors = np.array(descriptors, dtype=np.float32)
+        return keypoints, descriptors
     
-    #Paths for the dataset
-    # BBDD_DIR = "dataset/BBDD"
-    # QSD1_DIR = "dataset/QSD1"
-    # OUTPUT_DIR = "descriptors"
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "DAISY",
+            "step": self.step,
+            "radius": self.radius,
+            "rings": self.rings,
+            "histograms": self.histograms,
+            "orientations": self.orientations
+        }
+        
+class SIFTDescriptor(KeypointDescriptorMaker):
+    def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6):
+        self.n_features = n_features
+        self.n_octave_layers = n_octave_layers
+        self.contrast_threshold = contrast_threshold
+        self.edge_threshold = edge_threshold
+        self.sigma = sigma
+        self.sift = cv2.SIFT_create(nfeatures=n_features, nOctaveLayers=n_octave_layers, contrastThreshold=contrast_threshold, edgeThreshold=edge_threshold, sigma=sigma)
+        
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+        
+        keypoints, descriptors = self.sift.detectAndCompute(gray, mask)
+        return keypoints, descriptors
     
-    # # dataset/qsd1_w1/00003.jpg
-    # descr = ImageDescriptor(color_mapping='MAX_ABS_SCALE', color_space='RGB', bins_per_channel=64)
-    # img = cv2.imread("qsd1_w1/00003.jpg")
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "SIFT",
+            "n_features": self.n_features,
+            "n_octave_layers": self.n_octave_layers,
+            "contrast_threshold": self.contrast_threshold,
+            "edge_threshold": self.edge_threshold,
+            "sigma": self.sigma
+        }
+
+
+class DescriptorMatcher:
     
-    # hist = descr.compute_descriptor(img)
+    def __init__(self, matcher_type: str = 'BF', norm_type: int = cv2.NORM_L2, cross_check: bool = False, ratio_test_threshold: float = 0.75):
+        #matcher_type: 'BF' or 'FLANN'
+        #norm_type: cv2.NORM_L2 for sift and daisy, cv2.NORM_HAMMING for orb
+        self.matcher_type = matcher_type
+        self.norm_type = norm_type
+        self.cross_check = cross_check
+        self.ratio_test_threshold = ratio_test_threshold
+        
+        if matcher_type == "BF":
+            self.matcher = cv2.BFMatcher(normType=norm_type, crossCheck=cross_check)
+        else:
+            if norm_type == cv2.NORM_HAMMING:
+                index_params = dict(algorithm=6, table_number=12, key_size=20, multi_probe_level=2)
+                search_params = dict(checks=50)
+            else:
+                index_params = dict(algorithm=1, trees=5)
+                search_params = dict(checks=50)
+            self.matcher = cv2.FlannBasedMatcher(indexParams=index_params, searchParams=search_params)
+            
+    def match(self, descriptors1: np.ndarray, descriptors2: np.ndarray) -> list:
+        
+        if descriptors1 is None or descriptors2 is None or len(descriptors1) == 0 or len(descriptors2) == 0:
+            return []
+        matches = self.matcher.knnMatch(descriptors1, descriptors2, k=2)
+        good_matches = []
+        for m_n in matches:
+            if len(m_n) != 2:
+                continue
+            m, n = m_n
+            if m.distance < self.ratio_test_threshold * n.distance:
+                good_matches.append(m)
+        return good_matches
     
-    # print(hist.shape)
-    # print(hist.max())
-    # print(hist.min())
-    # print(hist.mean())
-    # print(hist.std())
-    # print(hist.sum())
+    def discard_painting(self, num_matches: int, threshold: int = 10) -> bool:
+        #return True if the number of matches is less than the threshold
+        return num_matches < threshold
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "matcher_type": self.matcher_type,
+            "norm_type": self.norm_type,
+            "cross_check": self.cross_check,
+            "ratio_test_threshold": self.ratio_test_threshold
+        }
+            
+        
+        
+
 if __name__ == "__main__":
-    image_path = "/home/bernat/MCV/C1/proyect/Team4/plot_results/test_images/00010.jpg"
-    image = cv2.imread(image_path)
-    if image is None:
-        raise FileNotFoundError("Image not found.")
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    image = image.astype(np.float32) / 255.0
-
-    # === Create descriptor maker ===
-    idm = ImageDescriptorMaker(
-        gamma_correction=1.0,
-        blur_image=False,
-        color_spaces=[ColorSpace.RGB],
-        bins=8,
-        keep_or_discard="K",
-        weights=None,
-        image_blocks=image_blocks_identity,
-        color_channels=[0, 2]
-    )
-
-    # === 1D HISTOGRAM TEST ===
-    hists_1d = idm.compute_1d_histogram(image)
-    print("1D histograms:", [h.shape for h in hists_1d])
-
-    # === 2D HISTOGRAM TEST ===
-    hists_2d = idm.compute_2d_histogram(image)
-    print("2D histograms:", [h.shape for h in hists_2d])
-
-    # visualize one 2D hist
-    plt.imshow(hists_2d[0], cmap='viridis')
-    plt.title("2D Histogram (ch0 vs ch2)")
-    plt.colorbar()
-    plt.show()
-
-    # === 3D HISTOGRAM TEST ===
-    hists_3d = idm.compute_3d_histogram(image)
-    print("3D histograms:", [h.shape for h in hists_3d])
-
-    # visualize one 3D hist as slices
-    if len(hists_3d) > 0:
-        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-        for i in range(3):
-            axes[i].imshow(hists_3d[0][:, :, i], cmap='viridis')
-            axes[i].set_title(f"3D hist slice {i}")
-        plt.show()
+    pass
+    
 
 
         
