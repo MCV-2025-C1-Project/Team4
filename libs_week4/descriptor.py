@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from skimage.feature import local_binary_pattern
 import pywt
 from skimage.feature import daisy
-
+from sklearn.decomposition import PCA
 # from cv2 import xfeatures2d
 
 from libs_week3.color_conversion import ColorConversion, ColorSpace
@@ -321,7 +321,329 @@ class SURFDescriptor(KeypointDescriptorMaker):
             "extended": self.extended,
             "upright": self.upright
         }
+        
+
+class PCASIFTDescriptor(KeypointDescriptorMaker):
+    def __init__(self, 
+                 num_components: int = 128, # A more common value than 128
+                 n_features: int = 0, 
+                 n_octave_layers: int = 3, 
+                 contrast_threshold: float = 0.04, 
+                 edge_threshold: float = 10, 
+                 sigma: float = 1.6):
+        
+        # SIFT parameters
+        self.n_features = n_features
+        self.n_octave_layers = n_octave_layers
+        self.contrast_threshold = contrast_threshold
+        self.edge_threshold = edge_threshold
+        self.sigma = sigma
+        
+        # PCA parameters
+        self.num_components = num_components
+        
+        # Create SIFT object
+        # Handle different OpenCV versions (contrib vs. main)
+        try:
+            self.sift = cv2.SIFT_create(nfeatures=n_features, 
+                                        nOctaveLayers=n_octave_layers, 
+                                        contrastThreshold=contrast_threshold, 
+                                        edgeThreshold=edge_threshold, 
+                                        sigma=sigma)
+        except AttributeError:
+            self.sift = cv2.xfeatures2d.SIFT_create(nfeatures=n_features, 
+                                                   nOctaveLayers=n_octave_layers, 
+                                                   contrastThreshold=contrast_threshold, 
+                                                   edgeThreshold=edge_threshold, 
+                                                   sigma=sigma)
+        
+
+        self.pca = PCA(n_components=self.num_components)
+        
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+        
+        # 1. Detect keypoints and compute SIFT descriptors
+        keypoints, descriptors = self.sift.detectAndCompute(gray, mask)
+        
+        if descriptors is None or len(descriptors) == 0:
+            return keypoints, np.array([])
+
+        try:
+            pca_descriptors = self.pca.fit_transform(descriptors)
+        except ValueError as e:
+            # This can happen if n_features < num_components
+            print(f"PCA Error: {e}. Returning empty descriptors.")
+            print("This often happens if the number of detected keypoints "
+                  f"({len(descriptors)}) is less than num_components ({self.num_components}).")
+            return keypoints, np.array([])
+
+
+        # 3. Normalize the PCA-SIFT descriptors
+        normalized_pca_descriptors = cv2.normalize(pca_descriptors, None)
+
+        # 4. Compute RootSIFT descriptors
+        #    We clip at 0 to avoid errors with tiny negative numbers
+        normalized_pca_descriptors = np.maximum(normalized_pca_descriptors, 0)
+        root_sift_descriptors = np.sqrt(normalized_pca_descriptors)
+
+        # 5. Perform L2 normalization on RootSIFT descriptors
+        #    Handle potential divide-by-zero if a descriptor vector is all zeros
+        norms = np.linalg.norm(root_sift_descriptors, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0 # Avoid division by zero
+        final_descriptors = root_sift_descriptors / norms
+        
+        return keypoints, final_descriptors
     
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "PCA-SIFT-Root (Flawed)",
+            "n_features": self.n_features,
+            "n_octave_layers": self.n_octave_layers,
+            "contrast_threshold": self.contrast_threshold,
+            "edge_threshold": self.edge_threshold,
+            "sigma": self.sigma,
+            "num_components": self.num_components
+        }
+    
+
+class HOGDescriptor(KeypointDescriptorMaker):
+    """
+    NOTE: HOG is a descriptor, not a keypoint detector. This class
+    uses a SIFT detector to find keypoints, and then computes HOG
+    descriptors at those keypoint locations.
+    """
+    def __init__(self,
+                 # HOG descriptor parameters
+                 win_size: tuple[int, int] = (32, 32),
+                 block_size: tuple[int, int] = (16, 16),
+                 block_stride: tuple[int, int] = (8, 8),
+                 cell_size: tuple[int, int] = (8, 8),
+                 nbins: int = 9,
+                 
+                 # SIFT detector parameters (for finding keypoints)
+                 n_features: int = 0,
+                 n_octave_layers: int = 3,
+                 contrast_threshold: float = 0.04,
+                 edge_threshold: float = 10,
+                 sigma: float = 1.6):
+
+        # Store HOG parameters
+        self.win_size = win_size
+        self.block_size = block_size
+        self.block_stride = block_stride
+        self.cell_size = cell_size
+        self.nbins = nbins
+        
+        # Store SIFT detector parameters
+        self.n_features = n_features
+        self.n_octave_layers = n_octave_layers
+        self.contrast_threshold = contrast_threshold
+        self.edge_threshold = edge_threshold
+        self.sigma = sigma
+
+        # 1. Initialize the HOG Descriptor object
+        self.hog = cv2.HOGDescriptor(win_size, 
+                                    block_size, 
+                                    block_stride, 
+                                    cell_size, 
+                                    nbins)
+        
+        # 2. Initialize the SIFT Detector object
+        try:
+            self.sift_detector = cv2.SIFT_create(
+                nfeatures=n_features, 
+                nOctaveLayers=n_octave_layers, 
+                contrastThreshold=contrast_threshold, 
+                edgeThreshold=edge_threshold, 
+                sigma=sigma
+            )
+        except AttributeError:
+            self.sift_detector = cv2.xfeatures2d.SIFT_create(
+                nfeatures=n_features, 
+                nOctaveLayers=n_octave_layers, 
+                contrastThreshold=contrast_threshold, 
+                edgeThreshold=edge_threshold, 
+                sigma=sigma
+            )
+
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list[cv2.KeyPoint], np.ndarray]:
+        """
+        Detects keypoints using SIFT, then computes HOG descriptors
+        at those keypoint locations.
+        """
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+        
+        keypoints = self.sift_detector.detect(gray, mask)
+        
+        if not keypoints:
+            return [], np.array([])
+        
+        locations = [kp.pt for kp in keypoints]
+        
+
+        descriptors = self.hog.compute(gray, locations=locations)
+        
+        if descriptors is None:
+            return keypoints, np.array([])
+            
+
+        descriptors = cv2.normalize(descriptors, None, norm_type=cv2.NORM_L2)
+
+        return keypoints, descriptors
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "HOG",
+            # HOG params
+            "win_size": self.win_size,
+            "block_size": self.block_size,
+            "block_stride": self.block_stride,
+            "cell_size": self.cell_size,
+            "nbins": self.nbins,
+            
+            # SIFT detector params
+            "detector_type": "SIFT",
+            "n_features": self.n_features,
+            "n_octave_layers": self.n_octave_layers,
+            "contrast_threshold": self.contrast_threshold,
+            "edge_threshold": self.edge_threshold,
+            "sigma": self.sigma
+        }
+
+class GLOHDescriptor(KeypointDescriptorMaker):
+    """
+    GLOH Descriptor based on Medium article:
+    "Exploring Gradient Location and Orientation Histogram (GLOH) for Image Recognition and Object Detection"
+    by Vincent Chung
+    (medium.com/@vincentchung_72457/exploring-gradient-location-orientation-histogram-gloh-for-image-recognition-and-object-detection-3e3c231a5b01)
+    """
+    def __init__(self,
+                 # Histogram parameter from the article's code
+                 nbins: int = 36,
+                 
+                 # SIFT detector parameters (used by the article)
+                 n_features: int = 0,
+                 n_octave_layers: int = 3,
+                 contrast_threshold: float = 0.04,
+                 edge_threshold: float = 10,
+                 sigma: float = 1.6):
+
+        # Store parameters
+        self.nbins = nbins
+        
+        # Store SIFT detector parameters
+        self.n_features = n_features
+        self.n_octave_layers = n_octave_layers
+        self.contrast_threshold = contrast_threshold
+        self.edge_threshold = edge_threshold
+        self.sigma = sigma
+        
+        # 1. Initialize the SIFT Detector object
+        # (The article uses this to find keypoints)
+        try:
+            self.sift_detector = cv2.SIFT_create(
+                nfeatures=n_features, 
+                nOctaveLayers=n_octave_layers, 
+                contrastThreshold=contrast_threshold, 
+                edgeThreshold=edge_threshold, 
+                sigma=sigma
+            )
+        except AttributeError:
+            self.sift_detector = cv2.xfeatures2d.SIFT_create(
+                nfeatures=n_features, 
+                nOctaveLayers=n_octave_layers, 
+                contrastThreshold=contrast_threshold, 
+                edgeThreshold=edge_threshold, 
+                sigma=sigma
+            )
+
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list[cv2.KeyPoint], np.ndarray]:
+        # BASED ON: medium.com/@vincentchung_72457/exploring-gradient-location-orientation-histogram-gloh-for-image-recognition-and-object-detection-3e3c231a5b01
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB_GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+        
+        
+        # Compute gradient magnitude and orientation using Sobel operators
+        grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+        
+        # Source: "mag, angle = cv2.cartToPolar(grad_x, grad_y, angleInDegrees=True)"
+        _mag, angle = cv2.cartToPolar(grad_x, grad_y, angleInDegrees=True)
+
+        # Compute keypoints using SIFT
+        keypoints = self.sift_detector.detect(gray, mask)
+
+        if not keypoints:
+            return [], np.array([])
+            
+        # Compute GLOH features for each keypoint
+        gloh_features = []
+        valid_keypoints = []
+        h, w = gray.shape
+
+        for kp in keypoints:
+            x, y = int(kp.pt[0]), int(kp.pt[1])
+            scale = int(kp.size / 2)
+            
+            # clip values at borders at image borders
+            y_min = max(0, y - scale)
+            y_max = min(h, y + scale)
+            x_min = max(0, x - scale)
+            x_max = min(w, x + scale)
+            
+            # Skip keypoints where the patch is empty
+            if y_min >= y_max or x_min >= x_max:
+                continue
+
+            # Extract the patch of gradient angles
+            angle_patch = angle[y_min:y_max, x_min:x_max]
+            
+            histogram = cv2.calcHist(
+                [angle_patch], 
+                channels=[0], 
+                mask=None, 
+                histSize=[self.nbins], 
+                ranges=[0, 360]
+            )
+            
+            # Add the computed histogram (descriptor)
+            gloh_features.append(histogram)
+            # Keep the keypoint that this descriptor belongs to
+            valid_keypoints.append(kp)
+
+        if not gloh_features:
+            return [], np.array([])
+
+        # Concatenate the GLOH features into a single feature vector
+        descriptors = np.array(gloh_features).reshape(len(gloh_features), self.nbins)
+        
+        descriptors = cv2.normalize(descriptors, None, norm_type=cv2.NORM_L2)
+        
+        return valid_keypoints, descriptors
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "ArticleGLOH (Custom)",
+            "nbins": self.nbins,
+            
+            # SIFT detector params
+            "detector_type": "SIFT",
+            "n_features": self.n_features,
+            "n_octave_layers": self.n_octave_layers,
+            "contrast_threshold": self.contrast_threshold,
+            "edge_threshold": self.edge_threshold,
+            "sigma": self.sigma
+        }
 
 class DescriptorMatcher:
     
