@@ -587,7 +587,7 @@ if __name__ == "__main__":
     print("OPTION 1: Testing single query with ORB (using cache)")
     print("="*80)
     results = test_query_matching(
-        query_id=2,
+        query_id=8,
         query_folder="qsd1_w4",
         bbdd_folder="BBDD",
         descriptor_type="orb",

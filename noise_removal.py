@@ -1048,11 +1048,11 @@ def evaluate_dataset(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_augmented
 if __name__ == "__main__":
     
     # # STEP 1: Test noise detection on sample images - Run it to see what images have noise and some infos
-     for i in range(0, 30):
-        image = cv2.imread(f"qsd2_w3/{i:05d}.jpg")
+    #  for i in range(0, 30):
+    #     image = cv2.imread(f"qsd2_w3/{i:05d}.jpg")
        
-        result = detect_noise(image)
-        print(f"Image {i:05d}: {result['noise_type']} - {result['snr']:.2f} dB - noise std: {result['noise_std']:.4f} kurtosis: {result['kurtosis']:.2f} ")
+    #     result = detect_noise(image)
+    #     print(f"Image {i:05d}: {result['noise_type']} - {result['snr']:.2f} dB - noise std: {result['noise_std']:.4f} kurtosis: {result['kurtosis']:.2f} ")
     
     
     
@@ -1092,10 +1092,10 @@ if __name__ == "__main__":
     
     # Method 5: Compare all methods on a single image
     # compare_methods_single_image(image_id=6)
-    # print("\n=== DENOISING SPECIFIC IMAGES ===")
-    # results = denoise_specific_images(
-    #     input_folder="qst1_w3",
-    #     output_folder="qst1_w3_denoised",
-    #     image_ids=[0,3,6,7,8,9,10,14,15,16,17,18,19,20,22,23,24,30,32,33,34,35,36,37,39,40,41,43,48]
-    # )
+    print("\n=== DENOISING SPECIFIC IMAGES ===")
+    results = denoise_specific_images(
+        input_folder="qsd1_w4",
+        output_folder="qsd1_w4_denoised",
+        image_ids=[3,8,12,17,19,22,23,24,25]
+    )
 
