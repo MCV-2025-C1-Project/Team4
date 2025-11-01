@@ -11,90 +11,406 @@ import team2_segmentation
 matplotlib.use('Agg')  # Use non-interactive backend to avoid Qt conflicts
 import matplotlib.pyplot as plt
 import itertools
-from typing import Iterator
+from typing import Iterator, Protocol, List, Literal
 import traceback
+from enum import Enum
 
 
-def split_if_two_paintings(img: np.ndarray, debug=False, grad_valley_thresh=8.5, valley_width_frac=0.05):
+class SplitCase(Enum):
+    """Enum representing the different painting split cases."""
+    SINGLE = "single"
+    HORIZONTAL = "horizontal"  # Left-to-right split
+    VERTICAL = "vertical"      # Top-to-bottom split
+
+
+class SplitCaseDetector(Protocol):
+    """Protocol for detecting IF and WHAT TYPE of split exists in an image."""
+
+    def detect(self, img: np.ndarray) -> SplitCase:
+        """
+        Detect which split case applies to the image.
+
+        Args:
+            img: BGR image
+
+        Returns:
+            SplitCase enum indicating SINGLE, HORIZONTAL, or VERTICAL
+        """
+        ...
+
+
+class ImageSplitter(Protocol):
+    """Protocol for determining WHERE to split an image for a given split case."""
+
+    def split(self, img: np.ndarray, case: SplitCase, debug: bool = False) -> List[np.ndarray]:
+        """
+        Split the image according to the specified case.
+
+        Args:
+            img: BGR image
+            case: The type of split to perform
+            debug: If True, display debug visualizations
+
+        Returns:
+            List of sub-images in RGB format
+        """
+        ...
+
+
+class GradientBasedCaseDetector:
     """
-    Detects if an image likely contains two paintings side by side
-    by analyzing the column-wise gradient magnitude profile.
-    Splits at the valley if found.
+    Detects which type of split case exists in an image using gradient analysis.
+
+    This class focuses solely on the DETECTION decision: determining IF an image
+    contains two paintings and WHAT orientation they have (horizontal or vertical).
     """
-    # --- Load and preprocess ---
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    h, w, _ = img.shape
 
-    # Convert to grayscale and normalize
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    gray = cv2.GaussianBlur(gray, (5,5), 1)
+    def __init__(self, grad_valley_thresh: float = 8.5, valley_width_frac: float = 0.05):
+        """
+        Args:
+            grad_valley_thresh: Threshold for valley depth to consider as a split
+            valley_width_frac: Fraction of image dimension to use as valley half-width
+        """
+        self.grad_valley_thresh = grad_valley_thresh
+        self.valley_width_frac = valley_width_frac
 
-    # --- Compute Sobel gradients ---
-    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
-    grad_mag = cv2.magnitude(gx, gy)
+    def _compute_gradient_profile(self, img: np.ndarray, axis: Literal['horizontal', 'vertical']) -> np.ndarray:
+        """
+        Compute gradient profile along specified axis.
 
-    # --- Column-wise average gradient (vertical projection) ---
-    col_profile = grad_mag.mean(axis=0)
+        Args:
+            img: RGB image
+            axis: 'horizontal' for column-wise (vertical projection) or 'vertical' for row-wise (horizontal projection)
 
-    # --- Smooth the profile ---
-    smooth_profile = cv2.GaussianBlur(col_profile.reshape(1, -1), (1, 99), 0).flatten()
+        Returns:
+            Normalized gradient profile (0-100 scale)
+        """
+        # Convert to grayscale and normalize
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 1)
 
-    # Normalize for plotting and relative thresholding
-    profile_norm = smooth_profile / (smooth_profile.max() + 1e-6) * 100
+        # Compute Sobel gradients
+        gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+        grad_mag = cv2.magnitude(gx, gy)
 
-    # --- Detect valley near the center ---
-    center_range = (int(w * 0.35), int(w * 0.65))
-    center_vals = profile_norm[center_range[0]:center_range[1]]
-    min_idx_rel = np.argmin(center_vals)
-    min_val = center_vals[min_idx_rel]
-    split_col = center_range[0] + min_idx_rel
+        # Compute profile along specified axis
+        if axis == 'horizontal':
+            # Column-wise average (for detecting vertical splits between left/right paintings)
+            profile = grad_mag.mean(axis=0)
+            kernel_size = (1, 99)
+        else:  # vertical
+            # Row-wise average (for detecting horizontal splits between top/bottom paintings)
+            profile = grad_mag.mean(axis=1)
+            kernel_size = (99, 1)
 
-    # Check if this valley is deep enough
-    # Compute local mean around it
-    valley_half_width = int(w * valley_width_frac)
-    left_mean = np.mean(profile_norm[:split_col - valley_half_width])
-    right_mean = np.mean(profile_norm[split_col + valley_half_width:])
-    mean_side = (left_mean + right_mean) / 2
+        # Smooth the profile
+        smooth_profile = cv2.GaussianBlur(profile.reshape(kernel_size), kernel_size, 0).flatten()
 
-    # Condition for two paintings
-    is_two = (min_val < grad_valley_thresh) and (min_val < 0.5 * mean_side)
+        # Normalize to 0-100 scale
+        profile_norm = smooth_profile / (smooth_profile.max() + 1e-6) * 100
 
-    if debug:
-        import matplotlib.pyplot as plt
-        img_show = img.copy()
+        return profile_norm
+
+    def _has_valley(self, profile: np.ndarray, dimension_size: int) -> tuple[bool, float, float]:
+        """
+        Detect if there's a significant valley in the center of the profile.
+
+        Args:
+            profile: Normalized gradient profile
+            dimension_size: Size of the dimension (width or height)
+
+        Returns:
+            Tuple of (has_split, min_value, mean_side_value)
+        """
+        # Look for valley in center region (35-65%)
+        center_range = (int(dimension_size * 0.35), int(dimension_size * 0.65))
+        center_vals = profile[center_range[0]:center_range[1]]
+
+        if len(center_vals) == 0:
+            return False, 0.0, 0.0
+
+        min_idx_rel = np.argmin(center_vals)
+        min_val = center_vals[min_idx_rel]
+        split_pos = center_range[0] + min_idx_rel
+
+        # Check if valley is deep enough
+        valley_half_width = int(dimension_size * self.valley_width_frac)
+
+        # Compute mean of sides (excluding valley region)
+        left_mean = np.mean(profile[:split_pos - valley_half_width]) if split_pos - valley_half_width > 0 else min_val
+        right_mean = np.mean(profile[split_pos + valley_half_width:]) if split_pos + valley_half_width < len(profile) else min_val
+        mean_side = (left_mean + right_mean) / 2
+
+        # Condition for split: valley must be deep enough
+        has_split = (min_val < self.grad_valley_thresh) and (min_val < 0.5 * mean_side)
+
+        return has_split, min_val, mean_side
+
+    def detect(self, img: np.ndarray) -> SplitCase:
+        """
+        Detect which split case applies to the image.
+
+        Strategy: Compute both horizontal and vertical gradient profiles,
+        detect valleys in each, and determine which split is more prominent.
+
+        Args:
+            img: BGR image
+
+        Returns:
+            SplitCase enum (SINGLE, HORIZONTAL, or VERTICAL)
+        """
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        h, w, _ = img_rgb.shape
+
+        # Compute gradient profiles for both axes
+        horizontal_profile = self._compute_gradient_profile(img_rgb, 'horizontal')
+        vertical_profile = self._compute_gradient_profile(img_rgb, 'vertical')
+
+        # Detect valleys in both profiles
+        h_has_split, h_min_val, h_mean_side = self._has_valley(horizontal_profile, w)
+        v_has_split, v_min_val, v_mean_side = self._has_valley(vertical_profile, h)
+
+        # Determine which split is more prominent based on valley depth ratio
+        # Lower ratio = deeper valley = stronger signal
+        h_valley_ratio = h_min_val / h_mean_side if h_mean_side > 0 else 1.0
+        v_valley_ratio = v_min_val / v_mean_side if v_mean_side > 0 else 1.0
+
+        # Decision logic
+        if h_has_split and v_has_split:
+            # Both detected - choose the one with deeper valley (lower ratio)
+            if h_valley_ratio < v_valley_ratio:
+                return SplitCase.HORIZONTAL
+            else:
+                return SplitCase.VERTICAL
+        elif h_has_split:
+            return SplitCase.HORIZONTAL
+        elif v_has_split:
+            return SplitCase.VERTICAL
+        else:
+            return SplitCase.SINGLE
+
+
+class GradientBasedSplitter:
+    """
+    Determines WHERE to split an image using gradient analysis.
+
+    This class focuses solely on finding the optimal split position for a given
+    split case. It can use different criteria than detection (e.g., more lenient).
+    """
+
+    def __init__(self, grad_valley_thresh: float = 10.0, valley_width_frac: float = 0.05):
+        """
+        Args:
+            grad_valley_thresh: Threshold for valley depth when finding split position
+            valley_width_frac: Fraction of image dimension to use as valley half-width
+        """
+        self.grad_valley_thresh = grad_valley_thresh
+        self.valley_width_frac = valley_width_frac
+
+    def _compute_gradient_profile(self, img: np.ndarray, axis: Literal['horizontal', 'vertical']) -> np.ndarray:
+        """
+        Compute gradient profile along specified axis.
+
+        Args:
+            img: RGB image
+            axis: 'horizontal' for column-wise (vertical projection) or 'vertical' for row-wise (horizontal projection)
+
+        Returns:
+            Normalized gradient profile (0-100 scale)
+        """
+        # Convert to grayscale and normalize
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 1)
+
+        # Compute Sobel gradients
+        gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+        grad_mag = cv2.magnitude(gx, gy)
+
+        # Compute profile along specified axis
+        if axis == 'horizontal':
+            # Column-wise average (for detecting vertical splits between left/right paintings)
+            profile = grad_mag.mean(axis=0)
+            kernel_size = (1, 99)
+        else:  # vertical
+            # Row-wise average (for detecting horizontal splits between top/bottom paintings)
+            profile = grad_mag.mean(axis=1)
+            kernel_size = (99, 1)
+
+        # Smooth the profile
+        smooth_profile = cv2.GaussianBlur(profile.reshape(kernel_size), kernel_size, 0).flatten()
+
+        # Normalize to 0-100 scale
+        profile_norm = smooth_profile / (smooth_profile.max() + 1e-6) * 100
+
+        return profile_norm
+
+    def _find_split_position(self, profile: np.ndarray, dimension_size: int) -> tuple[int, float, float]:
+        """
+        Find the best split position in the profile.
+
+        Args:
+            profile: Normalized gradient profile
+            dimension_size: Size of the dimension (width or height)
+
+        Returns:
+            Tuple of (split_position, min_value, mean_side_value)
+        """
+        # Look for valley in center region (35-65%)
+        center_range = (int(dimension_size * 0.35), int(dimension_size * 0.65))
+        center_vals = profile[center_range[0]:center_range[1]]
+
+        if len(center_vals) == 0:
+            # Fallback: split in the middle
+            return dimension_size // 2, 0.0, 0.0
+
+        min_idx_rel = np.argmin(center_vals)
+        min_val = center_vals[min_idx_rel]
+        split_pos = center_range[0] + min_idx_rel
+
+        # Compute mean of sides (for reporting)
+        valley_half_width = int(dimension_size * self.valley_width_frac)
+        left_mean = np.mean(profile[:split_pos - valley_half_width]) if split_pos - valley_half_width > 0 else min_val
+        right_mean = np.mean(profile[split_pos + valley_half_width:]) if split_pos + valley_half_width < len(profile) else min_val
+        mean_side = (left_mean + right_mean) / 2
+
+        return split_pos, min_val, mean_side
+
+    def split(self, img: np.ndarray, case: SplitCase, debug: bool = False) -> List[np.ndarray]:
+        """
+        Split the image according to the specified case.
+
+        Args:
+            img: BGR image
+            case: The type of split to perform
+            debug: If True, display debug visualizations
+
+        Returns:
+            List of sub-images (RGB format). Length is 1 for single painting, 2 for split cases.
+        """
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        h, w, _ = img_rgb.shape
+
+        if case == SplitCase.SINGLE:
+            if debug:
+                print(f"Split case: SINGLE painting (no split)")
+            return [img_rgb]
+
+        elif case == SplitCase.HORIZONTAL:
+            # Left-to-right split
+            horizontal_profile = self._compute_gradient_profile(img_rgb, 'horizontal')
+            split_col, min_val, mean_side = self._find_split_position(horizontal_profile, w)
+
+            if debug:
+                self._visualize_split(img_rgb, 'horizontal', split_col, horizontal_profile, min_val, mean_side)
+
+            left_img = img_rgb[:, :split_col]
+            right_img = img_rgb[:, split_col:]
+            return [left_img, right_img]
+
+        else:  # SplitCase.VERTICAL
+            # Top-to-bottom split
+            vertical_profile = self._compute_gradient_profile(img_rgb, 'vertical')
+            split_row, min_val, mean_side = self._find_split_position(vertical_profile, h)
+
+            if debug:
+                self._visualize_split(img_rgb, 'vertical', split_row, vertical_profile, min_val, mean_side)
+
+            top_img = img_rgb[:split_row, :]
+            bottom_img = img_rgb[split_row:, :]
+            return [top_img, bottom_img]
+
+    def _visualize_split(self, img_rgb: np.ndarray, direction: str, split_pos: int,
+                         profile: np.ndarray, min_val: float, mean_side: float):
+        """Debug visualization of the detected split."""
+        h, w, _ = img_rgb.shape
+
+        # Show original image
+        img_show = img_rgb.copy()
         cv2.imshow("Image", cv2.cvtColor(img_show, cv2.COLOR_RGB2BGR))
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-        cv2.imshow("Grad magnitude", (grad_mag - grad_mag.min()) / (grad_mag.max() - grad_mag.min()))
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
-
-        plt.figure(figsize=(10,4))
-        plt.plot(profile_norm, label="Smoothed column gradient profile")
-        plt.axvline(split_col, color='r', linestyle='--', label=f"Candidate split @ {split_col}")
-        plt.title(f"Valley min={min_val:.2f}, side mean={mean_side:.2f}, Two paintings={is_two}")
+        # Plot gradient profile
+        plt.figure(figsize=(10, 4))
+        plt.plot(profile, label=f"Smoothed {direction} gradient profile")
+        plt.axvline(split_pos, color='r', linestyle='--', label=f"Split @ {split_pos}")
+        plt.title(f"{direction.upper()} split: Valley min={min_val:.2f}, side mean={mean_side:.2f}")
         plt.legend()
-        # plt.waitforbuttonpress()
-        # plt.close()
         plt.show()
 
-        img_show = img.copy()
-        cv2.line(img_show, (split_col, 0), (split_col, h), (255, 0, 0), 3)
-        cv2.imshow("Detected Split", cv2.cvtColor(img_show, cv2.COLOR_RGB2BGR))
+        # Show split line on image
+        img_show = img_rgb.copy()
+        if direction == 'horizontal':
+            cv2.line(img_show, (split_pos, 0), (split_pos, h), (255, 0, 0), 3)
+        else:
+            cv2.line(img_show, (0, split_pos), (w, split_pos), (255, 0, 0), 3)
+        cv2.imshow(f"Detected {direction.upper()} Split", cv2.cvtColor(img_show, cv2.COLOR_RGB2BGR))
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-    # --- Return results ---
-    if not is_two:
-        return [img]  # single painting
 
-    # Split into two
-    left_img = img[:, :split_col]
-    right_img = img[:, split_col:]
-    return [left_img, right_img]
+class PaintingSplitPipeline:
+    """
+    Orchestrates detection and splitting of paintings in images.
+
+    This class combines a SplitCaseDetector (determines IF/WHAT) and an
+    ImageSplitter (determines WHERE), allowing flexible composition.
+    """
+
+    def __init__(self, detector: SplitCaseDetector, splitter: ImageSplitter):
+        """
+        Args:
+            detector: Strategy for detecting split case
+            splitter: Strategy for splitting the image
+        """
+        self.detector = detector
+        self.splitter = splitter
+
+    def process(self, img: np.ndarray, debug: bool = False) -> tuple[SplitCase, List[np.ndarray]]:
+        """
+        Detect and split an image containing one or two paintings.
+
+        Args:
+            img: BGR image
+            debug: If True, display debug visualizations
+
+        Returns:
+            Tuple of (detected_case, list_of_sub_images)
+        """
+        case = self.detector.detect(img)
+        sub_images = self.splitter.split(img, case, debug=debug)
+        return case, sub_images
+
+
+def split_if_two_paintings(img: np.ndarray, debug=False, grad_valley_thresh=8.5, valley_width_frac=0.05):
+    """
+    Detects if an image contains one or two paintings and splits accordingly.
+
+    Handles three cases:
+    - Single painting: returns [image]
+    - Two paintings left-to-right: returns [left_image, right_image]
+    - Two paintings top-to-bottom: returns [top_image, bottom_image]
+
+    Args:
+        img: BGR image
+        debug: If True, display debug visualizations
+        grad_valley_thresh: Threshold for valley depth (used for both detection and splitting)
+        valley_width_frac: Fraction of dimension to use as valley half-width
+
+    Returns:
+        List of sub-images in RGB format
+    """
+    # Create detector and splitter with same parameters for backward compatibility
+    detector = GradientBasedCaseDetector(grad_valley_thresh, valley_width_frac)
+    splitter = GradientBasedSplitter(grad_valley_thresh, valley_width_frac)
+
+    # Create pipeline and process
+    pipeline = PaintingSplitPipeline(detector, splitter)
+    _, sub_images = pipeline.process(img, debug=debug)
+
+    return sub_images
 
 
 import cv2
@@ -557,29 +873,38 @@ if __name__ == '__main__':
 
             try:
                 # === NEW STEP 1: Split if two paintings ===
-                splitted_images = split_if_two_paintings(image)
-
-                # Compute widths and cumulative offsets of sub-images to map to GT
-                widths = [si.shape[1] for si in splitted_images]  # each si is an image (RGB from split function)
-                cum_widths = np.cumsum([0] + widths)  # start offsets: length = len(widths)+1
+                detector = GradientBasedCaseDetector()
+                splitter = GradientBasedSplitter()
+                pipeline = PaintingSplitPipeline(detector, splitter)
+                split_case, splitted_images = pipeline.process(image)
 
                 # To store metrics of all parts of this query
                 query_metrics_parts = []
 
                 # === NEW STEP 2: Handle each (sub)painting independently ===
                 for idx, sub_image in enumerate(splitted_images):
-                    # Map sub-image columns back to original GT mask using cumulative widths
-                    x_start = int(cum_widths[idx])
-                    x_end = int(cum_widths[idx + 1])  # exclusive
-
-                    # If GT mask is full-image, slice the correct columns; otherwise assume gt_mask already matches sub-image
+                    # Map sub-image to original GT mask based on split type
                     if gt_mask is None:
                         raise ValueError(f"No gt_mask for image {image_name}")
-                    # Ensure gt_mask width matches original image width
-                    if gt_mask.shape[1] == image.shape[1]:
+
+                    # Slice GT mask according to split type
+                    if split_case == SplitCase.SINGLE:
+                        gt_mask_sub = gt_mask
+                    elif split_case == SplitCase.HORIZONTAL:
+                        # Left-to-right split: slice by columns
+                        widths = [si.shape[1] for si in splitted_images]
+                        cum_widths = np.cumsum([0] + widths)
+                        x_start = int(cum_widths[idx])
+                        x_end = int(cum_widths[idx + 1])
                         gt_mask_sub = gt_mask[:, x_start:x_end]
+                    elif split_case == SplitCase.VERTICAL:
+                        # Top-to-bottom split: slice by rows
+                        heights = [si.shape[0] for si in splitted_images]
+                        cum_heights = np.cumsum([0] + heights)
+                        y_start = int(cum_heights[idx])
+                        y_end = int(cum_heights[idx + 1])
+                        gt_mask_sub = gt_mask[y_start:y_end, :]
                     else:
-                        # If gt_mask already corresponds to sub-image sizes (unlikely), fall back to using whole gt_mask
                         gt_mask_sub = gt_mask
 
                     # Convert sub_image back to BGR because variance_background_removal expects BGR input
@@ -682,19 +1007,31 @@ if __name__ == '__main__':
                 image_name = query["name"]
 
                 # --- Split if needed ---
-                splitted_images = split_if_two_paintings(image)
-                widths = [si.shape[1] for si in splitted_images]
-                cum_widths = np.cumsum([0] + widths)
+                detector = GradientBasedCaseDetector()
+                splitter = GradientBasedSplitter()
+                pipeline = PaintingSplitPipeline(detector, splitter)
+                split_case, splitted_images = pipeline.process(image)
 
                 generated_mask_parts = []
 
                 for part_idx, sub_image in enumerate(splitted_images):
-                    # Compute corresponding GT region
-                    x_start = int(cum_widths[part_idx])
-                    x_end = int(cum_widths[part_idx + 1])
-
-                    if gt_mask.shape[1] == image.shape[1]:
+                    # Compute corresponding GT region based on split type
+                    if split_case == SplitCase.SINGLE:
+                        gt_mask_sub = gt_mask
+                    elif split_case == SplitCase.HORIZONTAL:
+                        # Left-to-right split: slice by columns
+                        widths = [si.shape[1] for si in splitted_images]
+                        cum_widths = np.cumsum([0] + widths)
+                        x_start = int(cum_widths[part_idx])
+                        x_end = int(cum_widths[part_idx + 1])
                         gt_mask_sub = gt_mask[:, x_start:x_end]
+                    elif split_case == SplitCase.VERTICAL:
+                        # Top-to-bottom split: slice by rows
+                        heights = [si.shape[0] for si in splitted_images]
+                        cum_heights = np.cumsum([0] + heights)
+                        y_start = int(cum_heights[part_idx])
+                        y_end = int(cum_heights[part_idx + 1])
+                        gt_mask_sub = gt_mask[y_start:y_end, :]
                     else:
                         gt_mask_sub = gt_mask
 
@@ -726,7 +1063,14 @@ if __name__ == '__main__':
                     output_path = visualize_masks(sub_bgr, predicted_mask, gt_mask_binary, suffix)
                     print(f"  Saved: {output_path}")
 
-                mask = np.hstack(generated_mask_parts)
+                # Concatenate mask parts based on split type
+                if split_case == SplitCase.HORIZONTAL:
+                    mask = np.hstack(generated_mask_parts)
+                elif split_case == SplitCase.VERTICAL:
+                    mask = np.vstack(generated_mask_parts)
+                else:  # SINGLE
+                    mask = generated_mask_parts[0] if generated_mask_parts else np.zeros_like(gt_mask[:, :, 0])
+
                 name = "generated_masks/" + image_name.split(".")[0] + ".png"
                 cv2.imwrite(name, (mask * 255).astype(np.uint8))
 
