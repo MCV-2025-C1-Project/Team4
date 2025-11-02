@@ -98,14 +98,25 @@ class GradientBasedCaseDetector:
         if axis == 'horizontal':
             # Column-wise average (for detecting vertical splits between left/right paintings)
             profile = grad_mag.mean(axis=0)
-            kernel_size = (1, 99)
         else:  # vertical
             # Row-wise average (for detecting horizontal splits between top/bottom paintings)
             profile = grad_mag.mean(axis=1)
-            kernel_size = (99, 1)
 
-        # Smooth the profile
-        smooth_profile = cv2.GaussianBlur(profile.reshape(kernel_size), kernel_size, 0).flatten()
+        # Smooth the profile - kernel size depends on profile length
+        profile_len = len(profile)
+        kernel_size = min(99, profile_len)
+        if kernel_size % 2 == 0:
+            kernel_size -= 1  # Must be odd
+        if kernel_size < 3:
+            kernel_size = 1  # No smoothing for very small profiles
+
+        if kernel_size > 1:
+            if axis == 'horizontal':
+                smooth_profile = cv2.GaussianBlur(profile.reshape(1, -1), (1, kernel_size), 0).flatten()
+            else:
+                smooth_profile = cv2.GaussianBlur(profile.reshape(-1, 1), (kernel_size, 1), 0).flatten()
+        else:
+            smooth_profile = profile
 
         # Normalize to 0-100 scale
         profile_norm = smooth_profile / (smooth_profile.max() + 1e-6) * 100
@@ -232,14 +243,25 @@ class GradientBasedSplitter:
         if axis == 'horizontal':
             # Column-wise average (for detecting vertical splits between left/right paintings)
             profile = grad_mag.mean(axis=0)
-            kernel_size = (1, 99)
         else:  # vertical
             # Row-wise average (for detecting horizontal splits between top/bottom paintings)
             profile = grad_mag.mean(axis=1)
-            kernel_size = (99, 1)
 
-        # Smooth the profile
-        smooth_profile = cv2.GaussianBlur(profile.reshape(kernel_size), kernel_size, 0).flatten()
+        # Smooth the profile - kernel size depends on profile length
+        profile_len = len(profile)
+        kernel_size = min(99, profile_len)
+        if kernel_size % 2 == 0:
+            kernel_size -= 1  # Must be odd
+        if kernel_size < 3:
+            kernel_size = 1  # No smoothing for very small profiles
+
+        if kernel_size > 1:
+            if axis == 'horizontal':
+                smooth_profile = cv2.GaussianBlur(profile.reshape(1, -1), (1, kernel_size), 0).flatten()
+            else:
+                smooth_profile = cv2.GaussianBlur(profile.reshape(-1, 1), (kernel_size, 1), 0).flatten()
+        else:
+            smooth_profile = profile
 
         # Normalize to 0-100 scale
         profile_norm = smooth_profile / (smooth_profile.max() + 1e-6) * 100
@@ -1157,6 +1179,7 @@ def generate_channel_configurations() -> Iterator[dict]:
         'channels': [('HSV', 1), ('HSV', 2)]  # Saturation + Value
     })
 
+    """
     for thr in [10, 15, 20, 25, 30]:
         for pixel_border in [5, 10, 15, 20, 25]:
             for gradient_threshold in [0.05, 0.1, 0.15, 0.20, 0.25]:
@@ -1167,7 +1190,7 @@ def generate_channel_configurations() -> Iterator[dict]:
                     'pixel_border': pixel_border,
                     'gradient_threshold': gradient_threshold,
                 })
-
+    """
 
 
 
@@ -1588,8 +1611,8 @@ def load_queries(queries_path: str):
 
 
 if __name__ == '__main__':
-    dataset_folder = "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd2_w3_denoised"
-    test_dataset_folder = "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qst2_w3_denoised"
+    dataset_folder = "/home/arnau-marcos-almansa/workspace/Team4/qsd1_w4"
+    test_dataset_folder = "/home/arnau-marcos-almansa/workspace/Team4/qsd1_w4"
     # dataset_folder = "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd2_w2"
 
     # Load split detection ground truth if available
@@ -1737,7 +1760,9 @@ if __name__ == '__main__':
                 # Truncate description for display
                 display_desc = combined_desc if len(combined_desc) <= 80 else combined_desc[:77] + "..."
                 print(f"{display_desc:80s} | mIoU: {avg_metrics['miou']:.4f} | "
-                      f"F1: {avg_metrics['f1_score']:.4f}")
+                      f"F1: {avg_metrics['f1_score']:.4f} | "
+                      f"P: {avg_metrics['precision']:.4f} | "
+                      f"R: {avg_metrics['recall']:.4f}")
 
         # Store split detection results for this pipeline (after all bg configs)
         if split_predictions:
@@ -1750,12 +1775,12 @@ if __name__ == '__main__':
     print("\n" + "="*100)
     print("TOP 10 CONFIGURATIONS (sorted by mIoU):")
     print("="*100)
+    print(f"{'Rank':<5} {'Configuration':<60} {'mIoU':>8} {'F1':>8} {'Precision':>10} {'Recall':>8}")
+    print("-" * 100)
     for i, result in enumerate(all_results[:10], 1):
-        print(f"{i:2d}. {result['config']:40s} | "
-              f"mIoU: {result['miou']:.4f} | "
-              f"F1: {result['f1_score']:.4f} | "
-              f"P: {result['precision']:.4f} | "
-              f"R: {result['recall']:.4f}")
+        config_short = result['config'][:60] if len(result['config']) > 60 else result['config']
+        print(f"{i:<5} {config_short:<60} {result['miou']:>8.4f} {result['f1_score']:>8.4f} "
+              f"{result['precision']:>10.4f} {result['recall']:>8.4f}")
 
     # === Save results to CSV ===
     import pandas as pd
