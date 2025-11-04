@@ -1,0 +1,37 @@
+{
+    "params": {
+        "keypoint_descriptor": {
+            "type": "ORB",
+            "n_features": 500,
+            "scale_factor": 1.2,
+            "n_levels": 8
+        },
+        "matcher": {
+            "matcher_type": "BF",
+            "norm_type": 6,
+            "cross_check": false,
+            "ratio_test_threshold": 0.75
+        },
+        "preprocess": {
+            "class": "Preprocess",
+            "steps": [
+                {
+                    "class": "CropToMask"
+                }
+            ]
+        },
+        "color_conversion": {
+            "targets": [
+                "RGB"
+            ],
+            "normalize": true
+        }
+    },
+    "metrics": {
+        "map@k1": 0.46153846153846156,
+        "map@k5": 0.4807692307692308
+    },
+    "timing": {
+        "total": 28.378159046173096
+    }
+}

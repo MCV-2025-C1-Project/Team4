@@ -1,0 +1,37 @@
+{
+    "params": {
+        "keypoint_descriptor": {
+            "type": "BRISK",
+            "thresh": 30,
+            "octaves": 3,
+            "pattern_scale": 1.0
+        },
+        "matcher": {
+            "matcher_type": "BF",
+            "norm_type": 6,
+            "cross_check": false,
+            "ratio_test_threshold": 0.75
+        },
+        "preprocess": {
+            "class": "Preprocess",
+            "steps": [
+                {
+                    "class": "CropToMask"
+                }
+            ]
+        },
+        "color_conversion": {
+            "targets": [
+                "RGB"
+            ],
+            "normalize": true
+        }
+    },
+    "metrics": {
+        "map@k1": 0.5384615384615384,
+        "map@k5": 0.5598290598290598
+    },
+    "timing": {
+        "total": 961.032318353653
+    }
+}

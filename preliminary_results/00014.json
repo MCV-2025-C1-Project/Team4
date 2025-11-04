@@ -1,0 +1,41 @@
+{
+    "params": {
+        "keypoint_descriptor": {
+            "type": "AKAZE",
+            "descriptor_type": 5,
+            "descriptor_size": 0,
+            "descriptor_channels": 3,
+            "threshold": 0.005,
+            "n_octaves": 4,
+            "n_octave_layers": 4,
+            "diffusivity": 1
+        },
+        "matcher": {
+            "matcher_type": "BF",
+            "norm_type": 6,
+            "cross_check": false,
+            "ratio_test_threshold": 0.75
+        },
+        "preprocess": {
+            "class": "Preprocess",
+            "steps": [
+                {
+                    "class": "CropToMask"
+                }
+            ]
+        },
+        "color_conversion": {
+            "targets": [
+                "RGB"
+            ],
+            "normalize": true
+        }
+    },
+    "metrics": {
+        "map@k1": 0.358974358974359,
+        "map@k5": 0.41025641025641024
+    },
+    "timing": {
+        "total": 103.79551386833191
+    }
+}

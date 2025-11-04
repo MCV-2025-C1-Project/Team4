@@ -1,0 +1,40 @@
+{
+    "params": {
+        "keypoint_descriptor": {
+            "type": "ORB",
+            "n_features": 500,
+            "scale_factor": 1.2,
+            "n_levels": 8
+        },
+        "matcher": {
+            "matcher_type": "FLANN",
+            "norm_type": 6,
+            "cross_check": false,
+            "ratio_test_threshold": 0.75
+        },
+        "preprocess": {
+            "class": "Preprocess",
+            "steps": [
+                {
+                    "class": "CropToMask"
+                }
+            ]
+        },
+        "color_conversion": {
+            "targets": [
+                "RGB"
+            ],
+            "normalize": true
+        }
+    },
+    "metrics": {
+        "map@k1": 0.4358974358974359,
+        "map@k5": 0.08717948717948719
+    },
+    "timing": {
+        "database_descriptors": 23.12159824371338,
+        "queries_descriptors": 2.4265553951263428,
+        "matching": 41.15622806549072,
+        "total": 66.70438170433044
+    }
+}
