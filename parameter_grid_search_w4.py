@@ -9,22 +9,21 @@ import json
 from pathlib import Path
 import sys
 
-# --- ADD THIS AT THE TOP to fix ModuleNotFoundError ---
-# This ensures the project root (e.g., 'Team4') is on the Python path
+# --- Fixes ModuleNotFoundError by adding project root to path ---
 project_root = Path(__file__).resolve().parent
 sys.path.append(str(project_root))
-# ---
 
-# Now, these imports will work correctly
+# --- Local Project Imports ---
 from libs_week3.database import ImageDatabase
 from libs_week3.average_precision import mapk
 import grid_background_removal_week3
 
-# IMPORTANT: Import the NEW grid search generator from week 4
+# --- Imports the NEW generator from Week 4 ---
 from libs_week4.hyperparameter_combinations import keypoint_hyperparameter_grid_search
 
 
 def parse_arguments():
+    # This function is unchanged from your original script.
     parser = argparse.ArgumentParser(description="Keypoint descriptor grid search for Week 4")
     parser.add_argument("database_path", type=str)
     parser.add_argument("queries_path", type=str)
@@ -35,13 +34,13 @@ def parse_arguments():
 
 
 def load_queries(queries_path: str, multiple_paintings=True, generate_masks=True) -> tuple[list[dict[str, Any]], list[list[int]]]:
+    # This function is unchanged from your original script.
     queries = []
     with open(os.path.join(queries_path, "gt_corresps.pkl"), 'rb') as f:
         gt = pickle.load(f)
 
     for filename in sorted(os.listdir(queries_path)):
-        if not filename.endswith(".jpg"):
-            continue
+        if not filename.endswith(".jpg"): continue
         image_path = os.path.join(queries_path, filename)
         image = cv2.imread(image_path)
         
@@ -51,26 +50,17 @@ def load_queries(queries_path: str, multiple_paintings=True, generate_masks=True
             imgs = [image]
 
         if generate_masks:
-            config = {
-                'name': 'HSV_SV',
-                'channels': [('HSV', 1), ('HSV', 2)],
-                'threshold': 0.005,
-            }
+            config = {'name': 'HSV_SV', 'channels': [('HSV', 1), ('HSV', 2)], 'threshold': 0.005}
             masks = [grid_background_removal_week3.variance_background_removal(img, config).astype(np.uint8) * 255 for img in imgs]
         else:
             masks = [np.ones(img.shape[:2], dtype=np.uint8) * 255 for img in imgs]
 
-        queries.append({
-            'images': imgs,
-            'masks': masks,
-            'name': filename,
-            'gt': int(Path(image_path).stem)
-        })
+        queries.append({'images': imgs, 'masks': masks, 'name': filename, 'gt': int(Path(image_path).stem)})
     return queries, gt
 
 
 def save_results_for_config(folder: str, iteration: int, results: Dict):
-    """Saves a single JSON file for the current hyperparameter configuration."""
+    # Simplified save function for the new workflow.
     os.makedirs(folder, exist_ok=True)
     filename = f"{iteration:05d}.json"
     filepath = os.path.join(folder, filename)
@@ -79,8 +69,10 @@ def save_results_for_config(folder: str, iteration: int, results: Dict):
 
 
 def prepare_gt_and_results_for_mapk(gt: list[list[int]], results: list[list[list[int]]]):
-    """This function is unchanged and works as expected."""
-    new_gt, new_results = [], []
+    # This is the EXACT function from your trusted Week 3 script.
+    # It correctly flattens the data for evaluation.
+    new_gt = []
+    new_results = []
     for gt_item, res_item in zip(gt, results):
         assert len(gt_item) == len(res_item)
         for id_val, topk in zip(gt_item, res_item):
@@ -99,12 +91,10 @@ def main():
     print("Loading queries...")
     queries, ground_truth = load_queries(args.queries_path)
 
-    # Main grid search loop using the NEW generator
     for i, params in enumerate(keypoint_hyperparameter_grid_search()):
         if i < args.from_iter or (i - args.from_iter) % args.every != 0:
             continue
 
-        # Unpack parameters for the current iteration
         descriptor_maker = params['keypoint_descriptor']
         matcher = params['matcher']
         preprocess = params['preprocess']
@@ -112,52 +102,29 @@ def main():
 
         print(f"\n--- Iteration {i:04d}: Descriptor: {descriptor_maker.to_dict()['type']}, Matcher: {matcher.to_dict()['matcher_type']} ---")
 
-        # 1. Compute descriptors for the entire database
-        start_time = time.time()
+        # Keypoint descriptor logic (Steps 1, 2, 3)
+        start_time_total = time.time()
         db_descriptors_cache = []
         for db_image in database.images:
             img = db_image.image
             mask = np.ones(img.shape[:2], dtype=np.uint8) * 255
-            
-            if preprocess:
-                img, mask = preprocess(img, mask)
-
-            # --- FIX 1: Unpack the tuple returned by color_conversion ---
+            if preprocess: img, mask = preprocess(img, mask)
             processed_img, processed_mask = color_conversion(img, mask)
-            
-            # --- FIX 2: Pass the unpacked variables to detect_and_compute ---
             _, descs = descriptor_maker.detect_and_compute(processed_img, processed_mask)
             db_descriptors_cache.append({'id': db_image.id, 'descriptors': descs})
-        db_desc_time = time.time() - start_time
-        print(f"  Database descriptor computation time: {db_desc_time:.2f}s")
-
-        # 2. Compute descriptors for all queries
-        start_time = time.time()
-        for query in queries:
-            query['descriptors_list'] = []
-            for img, mask in zip(query['images'], query['masks']):
-                if preprocess:
-                    img, mask = preprocess(img, mask)
-                
-                # --- FIX 3: Unpack the tuple here as well ---
-                processed_img, processed_mask = color_conversion(img, mask)
-
-                # --- FIX 4: Pass the unpacked variables here ---
-                _, descs = descriptor_maker.detect_and_compute(processed_img, processed_mask)
-                query['descriptors_list'].append(descs)
-        query_desc_time = time.time() - start_time
-        print(f"  Query descriptor computation time: {query_desc_time:.2f}s")
         
-        # 3. Match each query against the database and rank by matches
-        start_time = time.time()
         results_top_5 = []
         for query in queries:
-            query_results = []
-            for query_descs in query['descriptors_list']:
+            query_image_results = []
+            for img, mask in zip(query['images'], query['masks']):
+                if preprocess: img, mask = preprocess(img, mask)
+                processed_img, processed_mask = color_conversion(img, mask)
+                _, query_descs = descriptor_maker.detect_and_compute(processed_img, processed_mask)
+                
                 if query_descs is None or len(query_descs) == 0:
-                    query_results.append([-1] * 5)
+                    query_image_results.append([-1] * 5)
                     continue
-
+                
                 match_counts = []
                 for db_entry in db_descriptors_cache:
                     db_descs = db_entry['descriptors']
@@ -169,23 +136,37 @@ def main():
                 
                 sorted_results = sorted(match_counts, key=lambda x: x['matches'], reverse=True)
                 top_5_ids = [res['id'] for res in sorted_results[:5]]
-                
-                while len(top_5_ids) < 5:
-                    top_5_ids.append(-1)
-                
-                query_results.append(top_5_ids)
+                while len(top_5_ids) < 5: top_5_ids.append(-1)
+                query_image_results.append(top_5_ids)
+            results_top_5.append(query_image_results)
+        
+        total_time = time.time() - start_time_total
+        print(f"  Total processing time for iteration: {total_time:.2f}s")
 
-            results_top_5.append(query_results)
-        matching_time = time.time() - start_time
-        print(f"  Total matching time: {matching_time:.2f}s")
+        # Reconciliation block to handle detection mismatches robustly
+        reconciled_results = []
+        no_result_placeholder = [-1] * 5
+        for idx, gt_item in enumerate(ground_truth):
+            res_item = results_top_5[idx]
+            len_gt, len_res = len(gt_item), len(res_item)
+            if len_gt == len_res:
+                reconciled_results.append(res_item)
+            elif len_res < len_gt:
+                reconciled_results.append(res_item + [no_result_placeholder] * (len_gt - len_res))
+            else:
+                reconciled_results.append(res_item[:len_gt])
 
-        # 4. Evaluate results using MAPK
-        map_gt, map_top_5 = prepare_gt_and_results_for_mapk(ground_truth, results_top_5)
-        map5 = mapk(map_top_5, map_gt, k=5)
-        map1 = mapk(map_top_5, map_gt, k=1)
+        # --- CORRECT EVALUATION ---
+        # 1. Prepare the data using your trusted flattening function.
+        # 2. Call mapk with the correct argument order.
+        map_gt, map_top_5 = prepare_gt_and_results_for_mapk(ground_truth, reconciled_results)
+
+        map5 = mapk(map_gt, map_top_5, k=5)
+        map1 = mapk(map_gt, map_top_5, k=1)
+        
         print(f"  --> Results: map@k1={map1:.4f}, map@k5={map5:.4f}")
 
-        # 5. Save results for this specific configuration
+        # Save results
         results_data = {
             'params': {
                 'keypoint_descriptor': descriptor_maker.to_dict(),
@@ -193,17 +174,10 @@ def main():
                 'preprocess': preprocess.to_dict() if preprocess else None,
                 'color_conversion': color_conversion.to_dict()
             },
-            'metrics': {
-                'map@k1': map1,
-                'map@k5': map5
-            },
-            'timing': {
-                'database_descriptors': db_desc_time,
-                'queries_descriptors': query_desc_time,
-                'matching': matching_time,
-                'total': db_desc_time + query_desc_time + matching_time
-            }
+            'metrics': {'map@k1': map1, 'map@k5': map5},
+            'timing': {'total': total_time}
         }
         save_results_for_config(args.results_folder, i, results_data)
+
 if __name__ == "__main__":
     main()

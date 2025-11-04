@@ -19,31 +19,47 @@ import libs_week3.preprocessing as preprocessing
 
 
 def generate_orb_configs() -> Iterator[Dict[str, Any]]:
+    # param_grid = {
+    #     'n_features': [500, 1500, 3000],
+    #     'scale_factor': [1.2, 1.5],
+    #     'n_levels': [8, 12]
+    # }
     param_grid = {
-        'n_features': [500, 1500, 3000],
-        'scale_factor': [1.2, 1.5],
-        'n_levels': [8, 12]
+        'n_features': [500,],
+        'scale_factor': [1.2,],
+        'n_levels': [8,]
     }
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
         yield dict(zip(keys, v))
 
 def generate_sift_configs() -> Iterator[Dict[str, Any]]:
+    # param_grid = {
+    #     'n_features': [0, 500, 1500],
+    #     'n_octave_layers': [3, 4],
+    #     'contrast_threshold': [0.04, 0.06],
+    #     'edge_threshold': [10, 15]
+    # }
     param_grid = {
-        'n_features': [0, 500, 1500],
-        'n_octave_layers': [3, 4],
-        'contrast_threshold': [0.04, 0.06],
-        'edge_threshold': [10, 15]
+        'n_features': [ 500, ],
+        'n_octave_layers': [ 4],
+        'contrast_threshold': [ 0.06],
+        'edge_threshold': [15]
     }
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
         yield dict(zip(keys, v))
 
 def generate_brisk_configs() -> Iterator[Dict[str, Any]]:
+    # param_grid = {
+    #     'thresh': [30, 50, 70],
+    #     'octaves': [3, 4],
+    #     'pattern_scale': [1.0, 1.2]
+    # }
     param_grid = {
-        'thresh': [30, 50, 70],
-        'octaves': [3, 4],
-        'pattern_scale': [1.0, 1.2]
+        'thresh': [30, ],
+        'octaves': [3, ],
+        'pattern_scale': [1.0,]
     }
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
