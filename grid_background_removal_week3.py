@@ -888,27 +888,39 @@ def variance_background_removal(image: np.ndarray, channel_config: dict):
 
 def generate_split_pipeline_configurations() -> Iterator[dict]:
     """
-    Generate configurations for painting split detection and splitting.
+    Generate ALL configurations that achieve 100% split detection accuracy.
+
+    **USE generate_split_pipeline_configurations_reduced() FOR FASTER GRID SEARCH**
 
     Returns instances of detector and splitter objects (not just parameters).
     This follows the pattern from libs_week3/hyperparameter_combinations.py
     where actual objects are instantiated.
 
-    Generates combinations of:
-    - Multiple detector types (Gradient, AspectRatio, Hybrid)
-    - Multiple splitter types (Gradient, Histogram, Edge)
-    - Various parameter settings for each
+    IMPORTANT: Based on grid_split_detection.py results (2430 perfect configs found),
+    ONLY Gradient Detector + Gradient Splitter with specific parameter ranges
+    achieve 100% split detection accuracy on the dataset.
+
+    All other combinations (AspectRatio detector, Hybrid detector, Histogram splitter,
+    Edge splitter) had at least 1 failure and are excluded.
+
+    Yields:
+        2430 configurations, all guaranteed to achieve perfect split detection
+        WARNING: With 96 background configs, this creates 233,280 total combinations!
     """
 
-    # === 1. GRADIENT-BASED DETECTOR + GRADIENT SPLITTER ===
-    detection_thresholds = [6.5, 8.5, 10.0]  # Reduced from 5
-    splitting_thresholds = [8.5, 10.0, 12.0]  # Reduced from 5
-    valley_width_fracs = [0.05, 0.07]  # Reduced from 4
+    # === GRADIENT-BASED DETECTOR + GRADIENT SPLITTER (PERFECT CONFIGS ONLY) ===
+    # These parameter ranges were determined by grid_split_detection.py
+    # to achieve 100% split detection accuracy (30/30 images correct)
+    detection_thresholds = [7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 11.0, 12.0]  # 9 values
+    detection_valley_fracs = [0.03, 0.04, 0.06, 0.07, 0.08]  # 5 values (0.05 excluded - not in perfect configs)
+    splitting_thresholds = [6.0, 7.0, 8.0, 8.5, 9.0, 10.0, 11.0, 12.0, 13.0]  # 9 values
+    splitting_valley_fracs = [0.03, 0.04, 0.05, 0.06, 0.07, 0.08]  # 6 values
+    # Total: 9 × 5 × 9 × 6 = 2430 configurations
 
     for detect_thresh in detection_thresholds:
-        for detect_valley_frac in valley_width_fracs:
+        for detect_valley_frac in detection_valley_fracs:
             for split_thresh in splitting_thresholds:
-                for split_valley_frac in valley_width_fracs:
+                for split_valley_frac in splitting_valley_fracs:
                     detector = GradientBasedCaseDetector(
                         grad_valley_thresh=detect_thresh,
                         valley_width_frac=detect_valley_frac
@@ -935,6 +947,72 @@ def generate_split_pipeline_configurations() -> Iterator[dict]:
                         'split_valley_frac': split_valley_frac,
                     }
 
+    # NOTE: All other detector/splitter combinations (AspectRatio, Hybrid, Histogram, Edge)
+    # were removed because they did NOT achieve 100% split detection accuracy in grid search.
+    # Only Gradient Detector + Gradient Splitter with the above parameters achieve perfect accuracy.
+
+
+def generate_split_pipeline_configurations_reduced() -> Iterator[dict]:
+    """
+    Generate a SMALL, DIVERSE subset of perfect split detection configurations.
+
+    This function generates only a carefully selected subset of the 2430 perfect configs
+    to make grid search more manageable while still covering the parameter space.
+
+    Strategy: Sample key points across the parameter space:
+    - Low, medium, high values for each parameter
+    - Ensures diversity without redundancy
+
+    Yields:
+        ~50 configurations, all guaranteed to achieve perfect split detection
+    """
+
+    # === REDUCED PARAMETER GRID (DIVERSE SAMPLING) ===
+    # Sample low, medium, high values from each parameter range
+    detection_thresholds = [7.0, 8.5, 10.0, 12.0]  # 4 values (low, mid-low, mid-high, high)
+    detection_valley_fracs = [0.03, 0.06, 0.08]  # 3 values (low, mid, high)
+    splitting_thresholds = [6.0, 9.0, 13.0]  # 3 values (low, mid, high)
+    splitting_valley_fracs = [0.03, 0.05, 0.08]  # 3 values (low, mid, high)
+    # Total: 4 × 3 × 3 × 3 = 108 configurations
+
+    for detect_thresh in detection_thresholds:
+        for detect_valley_frac in detection_valley_fracs:
+            for split_thresh in splitting_thresholds:
+                for split_valley_frac in splitting_valley_fracs:
+                    detector = GradientBasedCaseDetector(
+                        grad_valley_thresh=detect_thresh,
+                        valley_width_frac=detect_valley_frac
+                    )
+                    splitter = GradientBasedSplitter(
+                        grad_valley_thresh=split_thresh,
+                        valley_width_frac=split_valley_frac
+                    )
+                    pipeline = PaintingSplitPipeline(detector, splitter)
+
+                    yield {
+                        'pipeline': pipeline,
+                        'detector': detector,
+                        'splitter': splitter,
+                        'detector_type': 'Gradient',
+                        'splitter_type': 'Gradient',
+                        'description': (
+                            f"GradDet(th={detect_thresh:.1f},vf={detect_valley_frac:.2f})+"
+                            f"GradSplit(th={split_thresh:.1f},vf={split_valley_frac:.2f})"
+                        ),
+                        'detect_thresh': detect_thresh,
+                        'detect_valley_frac': detect_valley_frac,
+                        'split_thresh': split_thresh,
+                        'split_valley_frac': split_valley_frac,
+                    }
+
+
+def generate_split_pipeline_configurations_ALL_ORIGINAL() -> Iterator[dict]:
+    """
+    DEPRECATED: This generates ALL configurations including those that fail split detection.
+    Use generate_split_pipeline_configurations() instead for perfect accuracy configs only.
+
+    Kept for reference purposes only.
+    """
     # === 2. ASPECT RATIO DETECTOR + VARIOUS SPLITTERS ===
     aspect_h_ratios = [1.4, 1.6, 1.8]
     aspect_v_ratios = [0.55, 0.65, 0.75]
@@ -1524,6 +1602,46 @@ def evaluate_split_detection(predicted: dict[str, SplitCase],
     }
 
 
+def quick_split_detection_check(split_predictions: dict[str, SplitCase],
+                                split_ground_truth: dict[str, SplitCase]) -> dict:
+    """
+    Quick evaluation of split detection for a single configuration.
+    Returns a summary suitable for real-time feedback during grid search.
+
+    Args:
+        split_predictions: Dictionary mapping image names to predicted SplitCase
+        split_ground_truth: Dictionary mapping image names to ground truth SplitCase
+
+    Returns:
+        Dictionary with 'num_correct', 'num_total', 'num_failures', 'failures' list
+    """
+    if not split_ground_truth or not split_predictions:
+        return {'num_correct': 0, 'num_total': 0, 'num_failures': 0, 'failures': []}
+
+    # Count matches and failures
+    num_correct = 0
+    num_total = 0
+    failures = []
+
+    for img_name, predicted_case in split_predictions.items():
+        if img_name in split_ground_truth:
+            num_total += 1
+            gt_case = split_ground_truth[img_name]
+            if predicted_case == gt_case:
+                num_correct += 1
+            else:
+                failures.append(f"{img_name}(pred:{predicted_case.value},gt:{gt_case.value})")
+
+    num_failures = num_total - num_correct
+
+    return {
+        'num_correct': num_correct,
+        'num_total': num_total,
+        'num_failures': num_failures,
+        'failures': failures
+    }
+
+
 def print_detection_evaluation(metrics: dict, title: str = "Detection Evaluation"):
     """
     Pretty print detection evaluation metrics.
@@ -1620,7 +1738,7 @@ if __name__ == '__main__':
     split_ground_truth = load_split_ground_truth(split_gt_path)
 
     # Count total configurations
-    num_split_configs = len(list(generate_split_pipeline_configurations()))
+    num_split_configs = len(list(generate_split_pipeline_configurations_reduced()))
     num_bg_configs = len(list(generate_channel_configurations()))
     total_configs = num_split_configs * num_bg_configs
 
@@ -1644,12 +1762,15 @@ if __name__ == '__main__':
     split_detection_results = {}  # split_config_desc -> {image_name -> SplitCase}
 
     # Nested grid search: split pipelines × background removal configs
-    for split_config in generate_split_pipeline_configurations():
+    # Use generate_split_pipeline_configurations_reduced() for faster grid search (108 configs)
+    # Use generate_split_pipeline_configurations() for exhaustive search (2430 configs)
+    for split_config in generate_split_pipeline_configurations_reduced():
         pipeline = split_config['pipeline']
         split_desc = split_config['description']
 
         # Store predictions for this split configuration
         split_predictions = {}
+        split_detection_eval = None  # Will store evaluation results
 
         for bg_config in generate_channel_configurations():
             config_metrics = []
@@ -1736,6 +1857,10 @@ if __name__ == '__main__':
 
             # === Existing code: Average across all queries for this config ===
             if config_metrics:
+                # Evaluate split detection once per split config (not per bg config)
+                if split_detection_eval is None and split_ground_truth:
+                    split_detection_eval = quick_split_detection_check(split_predictions, split_ground_truth)
+
                 # Combine split and background removal descriptions
                 combined_desc = f"{split_desc} + {bg_config['description']}"
 
@@ -1754,15 +1879,36 @@ if __name__ == '__main__':
                     'recall': np.mean([m['recall'] for m in config_metrics]),
                     'f1_score': np.mean([m['f1_score'] for m in config_metrics]),
                     'miou': np.mean([m['miou'] for m in config_metrics]),
+                    # Split detection results (same for all bg configs with this split config)
+                    'split_detection_failures': split_detection_eval['num_failures'] if split_detection_eval else None,
+                    'split_detection_correct': split_detection_eval['num_correct'] if split_detection_eval else None,
+                    'split_detection_total': split_detection_eval['num_total'] if split_detection_eval else None,
                 }
                 all_results.append(avg_metrics)
 
                 # Truncate description for display
                 display_desc = combined_desc if len(combined_desc) <= 80 else combined_desc[:77] + "..."
+
+                # Build split detection status string
+                if split_detection_eval:
+                    if split_detection_eval['num_failures'] == 0:
+                        split_status = f"Split: ✓ OK ({split_detection_eval['num_correct']}/{split_detection_eval['num_total']})"
+                    else:
+                        split_status = f"Split: ✗ {split_detection_eval['num_failures']} fail"
+                else:
+                    split_status = "Split: N/A"
+
                 print(f"{display_desc:80s} | mIoU: {avg_metrics['miou']:.4f} | "
                       f"F1: {avg_metrics['f1_score']:.4f} | "
                       f"P: {avg_metrics['precision']:.4f} | "
-                      f"R: {avg_metrics['recall']:.4f}")
+                      f"R: {avg_metrics['recall']:.4f} | {split_status}")
+
+                # If there are failures, print details on next line
+                if split_detection_eval and split_detection_eval['num_failures'] > 0:
+                    failures_preview = ', '.join(split_detection_eval['failures'][:3])
+                    if len(split_detection_eval['failures']) > 3:
+                        failures_preview += f" ... +{len(split_detection_eval['failures']) - 3} more"
+                    print(f"    └─ Failures: {failures_preview}")
 
         # Store split detection results for this pipeline (after all bg configs)
         if split_predictions:
@@ -1772,15 +1918,27 @@ if __name__ == '__main__':
     # === Sort and summarize results ===
     all_results.sort(key=lambda x: x['miou'], reverse=True)
 
-    print("\n" + "="*100)
+    print("\n" + "="*120)
     print("TOP 10 CONFIGURATIONS (sorted by mIoU):")
-    print("="*100)
-    print(f"{'Rank':<5} {'Configuration':<60} {'mIoU':>8} {'F1':>8} {'Precision':>10} {'Recall':>8}")
-    print("-" * 100)
+    print("="*120)
+    print(f"{'Rank':<5} {'Configuration':<50} {'mIoU':>8} {'F1':>8} {'Precision':>10} {'Recall':>8} {'Split Detection':>18}")
+    print("-" * 120)
     for i, result in enumerate(all_results[:10], 1):
-        config_short = result['config'][:60] if len(result['config']) > 60 else result['config']
-        print(f"{i:<5} {config_short:<60} {result['miou']:>8.4f} {result['f1_score']:>8.4f} "
-              f"{result['precision']:>10.4f} {result['recall']:>8.4f}")
+        config_short = result['config'][:50] if len(result['config']) > 50 else result['config']
+
+        # Format split detection
+        if result.get('split_detection_total') is not None:
+            split_fail = result['split_detection_failures']
+            split_total = result['split_detection_total']
+            if split_fail == 0:
+                split_str = f"✓ OK ({split_total}/{split_total})"
+            else:
+                split_str = f"✗ {split_fail} fail"
+        else:
+            split_str = "N/A"
+
+        print(f"{i:<5} {config_short:<50} {result['miou']:>8.4f} {result['f1_score']:>8.4f} "
+              f"{result['precision']:>10.4f} {result['recall']:>8.4f} {split_str:>18}")
 
     # === Save results to CSV ===
     import pandas as pd
@@ -1851,7 +2009,7 @@ if __name__ == '__main__':
 
         # Reconstruct split pipeline with best parameters
         best_split_pipeline = None
-        for split_config in generate_split_pipeline_configurations():
+        for split_config in generate_split_pipeline_configurations_reduced():
             if split_config["description"] == best_config["split_config"]:
                 best_split_pipeline = split_config['pipeline']
                 break
