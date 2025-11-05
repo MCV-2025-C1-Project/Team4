@@ -691,8 +691,54 @@ class DescriptorMatcher:
             "ratio_test_threshold": self.ratio_test_threshold
         }
             
-        
-        
+
+# FIXME: this score can be improved a lot, like #inliers / sqrt(#keypoints_q * #keypoints_db) which is more symetrical
+class HomographyScorer:
+    def __init__(self, ransac_thresh: float = 5.0, max_reproj_error: float = 5.0):
+        self.ransac_thresh = ransac_thresh
+        self.max_reproj_error = max_reproj_error
+
+    def score(self, src_pts: np.ndarray, dst_pts: np.ndarray):
+        if len(src_pts) < 4:
+            return False, 0.0, {"reason": "not_enough_points"}
+
+        M, mask = cv2.findHomography(src_pts, dst_pts, method=cv2.RANSAC, ransacReprojThreshold=self.ransac_thresh)
+
+        if M is None or mask is None:
+            return False, 0.0, {"reason": "homography_failed"}
+
+        inliers = mask.ravel().astype(bool)
+        n_inliers = np.sum(inliers)
+        inlier_ratio = n_inliers / len(src_pts)
+
+        src_inliers = src_pts[inliers]
+        dst_inliers = dst_pts[inliers]
+
+        if len(src_inliers) == 0:
+            return False, 0.0, {"reason": "no_inliers"}
+
+        src_proj = cv2.perspectiveTransform(src_inliers.reshape(-1, 1, 2), M).reshape(-1, 2)
+        reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
+
+        det = np.linalg.det(M[:2, :2])
+        if det <= 0 or det > 4: # negative det is a bad homography, det too large is bad too
+            valid = False
+        elif reproj_error > self.max_reproj_error:
+            valid = False
+        else:
+            valid = True
+
+        score = inlier_ratio * np.exp(-0.5 * (reproj_error / self.max_reproj_error))
+
+        info = {
+            "n_inliers": int(n_inliers),
+            "total_matches": int(len(src_pts)),
+            "inlier_ratio": float(inlier_ratio),
+            "reproj_error": float(reproj_error),
+            "det": float(det),
+        }
+
+        return valid, float(score), info
 
 if __name__ == "__main__":
     
