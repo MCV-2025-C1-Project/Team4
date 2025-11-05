@@ -739,13 +739,14 @@ class HomographyScorer(Scorer):
 
     def score(self, query_image: np.ndarray, query_keypoints, query_descriptors, database_image: np.ndarray, database_keypoints, database_descriptors):
 
-        src_pts, src_desc, dst_pts, dst_desc = self.matcher.match_keypoints_descriptors(query_keypoints, query_descriptors, database_keypoints, database_descriptors)
+        src_kpts, src_desc, dst_kpts, dst_desc = self.matcher.match_keypoints_descriptors(query_keypoints, query_descriptors, database_keypoints, database_descriptors)
 
-        if len(src_pts) < 4:
+        # check if the homography can be computed in a stable manner, with less than 20 points it may find homographies that can be "whatever"
+        if len(src_kpts) < 20: # TODO: this 20 can increase to 50 or so
             return False, 0.0, {"reason": "not_enough_points"}
 
-        src_pts = np.float32([kpt.pt for kpt in src_pts])
-        dst_pts = np.float32([kpt.pt for kpt in dst_pts])
+        src_pts = np.float32([kpt.pt for kpt in src_kpts])
+        dst_pts = np.float32([kpt.pt for kpt in dst_kpts])
 
         M, mask = cv2.findHomography(src_pts, dst_pts, method=cv2.RANSAC, ransacReprojThreshold=self.ransac_thresh)
 
@@ -766,7 +767,8 @@ class HomographyScorer(Scorer):
         reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
 
         det = np.linalg.det(M[:2, :2])
-        if det <= 0 or det > 4: # negative det is a bad homography, det too large is bad too
+        # TODO: the hardcoded 10 can probably be computed from the ratio of the #pixels of both images
+        if det <= 0.4 or det > 10: # negative det is a flip, det too large or too small is bad too
             valid = False
         elif reproj_error > self.max_reproj_error:
             valid = False

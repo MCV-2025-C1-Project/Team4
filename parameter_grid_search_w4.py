@@ -35,17 +35,18 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def load_queries(queries_path: str, multiple_paintings=True, generate_masks=True) -> tuple[list[dict[str, Any]], list[list[int]]]:
+def load_queries(queries_path: str, multiple_paintings=True, generate_masks=False) -> tuple[list[dict[str, Any]], list[list[int]]]:
     # This function is unchanged from your original script.
     queries = []
     with open(os.path.join(queries_path, "gt_corresps.pkl"), 'rb') as f:
         gt = pickle.load(f)
 
     for filename in sorted(os.listdir(queries_path)):
-        if not filename.endswith(".jpg"): continue
+        if not filename.endswith(".jpg"):
+            continue
         image_path = os.path.join(queries_path, filename)
         image = cv2.imread(image_path)
-        
+
         if multiple_paintings:
             imgs = grid_background_removal_week3.split_if_two_paintings(image)
         else:
