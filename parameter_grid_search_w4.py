@@ -9,12 +9,14 @@ import json
 from pathlib import Path
 import sys
 
+from libs_week4.descriptor import KeypointAndDescriptorMaker
+
 # --- Fixes ModuleNotFoundError by adding project root to path ---
 project_root = Path(__file__).resolve().parent
 sys.path.append(str(project_root))
 
 # --- Local Project Imports ---
-from libs_week3.database import ImageDatabase
+from libs_week4.database import ImageDatabase
 from libs_week3.average_precision import mapk
 import grid_background_removal_week3
 
@@ -95,47 +97,27 @@ def main():
         if i < args.from_iter or (i - args.from_iter) % args.every != 0:
             continue
 
-        descriptor_maker = params['keypoint_descriptor']
+        descriptor_maker: KeypointAndDescriptorMaker = params['keypoint_and_descriptor_maker']
         matcher = params['matcher']
-        preprocess = params['preprocess']
-        color_conversion = params['color_conversion']
+        scorer = params['scorer']
 
-        print(f"\n--- Iteration {i:04d}: Descriptor: {descriptor_maker.to_dict()['type']}, Matcher: {matcher.to_dict()['matcher_type']} ---")
+        print(f"\n--- Iteration {i:04d}: Descriptor: {descriptor_maker.descriptor_computer.to_dict()['type']}, Matcher: {matcher.to_dict()['matcher_type']} ---")
 
         # Keypoint descriptor logic (Steps 1, 2, 3)
         start_time_total = time.time()
-        db_descriptors_cache = []
-        for db_image in database.images:
-            img = db_image.image
-            mask = np.ones(img.shape[:2], dtype=np.uint8) * 255
-            if preprocess: img, mask = preprocess(img, mask)
-            processed_img, processed_mask = color_conversion(img, mask)
-            _, descs = descriptor_maker.detect_and_compute(processed_img, processed_mask)
-            db_descriptors_cache.append({'id': db_image.id, 'descriptors': descs})
+
+        database.reset_descriptors_distances_and_scores()
+        database.compute_keypoints_and_descriptors(descriptor_maker)
         
         results_top_5 = []
         for query in queries:
             query_image_results = []
             for img, mask in zip(query['images'], query['masks']):
-                if preprocess: img, mask = preprocess(img, mask)
-                processed_img, processed_mask = color_conversion(img, mask)
-                _, query_descs = descriptor_maker.detect_and_compute(processed_img, processed_mask)
+                query_keypoints, query_descriptors = descriptor_maker.detect_and_compute(img, mask)
                 
-                if query_descs is None or len(query_descs) == 0:
-                    query_image_results.append([-1] * 5)
-                    continue
+                result = database.query(img, query_keypoints, query_descriptors, scorer, k=10)
                 
-                match_counts = []
-                for db_entry in db_descriptors_cache:
-                    db_descs = db_entry['descriptors']
-                    num_matches = 0
-                    if db_descs is not None and len(db_descs) > 0:
-                        good_matches = matcher.match(query_descs, db_descs)
-                        num_matches = len(good_matches)
-                    match_counts.append({'id': db_entry['id'], 'matches': num_matches})
-                
-                sorted_results = sorted(match_counts, key=lambda x: x['matches'], reverse=True)
-                top_5_ids = [res['id'] for res in sorted_results[:5]]
+                top_5_ids = [res.id for res in result[:5]]
                 while len(top_5_ids) < 5: top_5_ids.append(-1)
                 query_image_results.append(top_5_ids)
             results_top_5.append(query_image_results)
@@ -169,10 +151,9 @@ def main():
         # Save results
         results_data = {
             'params': {
-                'keypoint_descriptor': descriptor_maker.to_dict(),
+                'keypoint_and_descriptor:maker': descriptor_maker.to_dict(),
                 'matcher': matcher.to_dict(),
-                'preprocess': preprocess.to_dict() if preprocess else None,
-                'color_conversion': color_conversion.to_dict()
+                'scorer': scorer.to_dict()
             },
             'metrics': {'map@k1': map1, 'map@k5': map5},
             'timing': {'total': total_time}

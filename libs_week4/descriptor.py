@@ -101,7 +101,7 @@ def get_colorspace_ranges(color_space: 'ColorSpace') -> list[tuple[float, float]
 
 
 
-class KeypointDescriptorMaker(abc.ABC):
+class DescriptorComputer(abc.ABC):
     #keypoint descriptor class
     
     @abc.abstractmethod
@@ -116,7 +116,7 @@ class KeypointDescriptorMaker(abc.ABC):
         pass
 
 
-class ORBDescriptor(KeypointDescriptorMaker):
+class ORBDescriptor(DescriptorComputer):
     def __init__(self, n_features: int = 500, scale_factor: float = 1.2, n_levels: int = 8):
         self.n_features = n_features
         self.scale_factor = scale_factor
@@ -140,7 +140,7 @@ class ORBDescriptor(KeypointDescriptorMaker):
             "n_levels": self.n_levels
         }
 
-class DaisyDescriptor(KeypointDescriptorMaker):
+class DaisyDescriptor(DescriptorComputer):
     def __init__(self, step: int = 4, radius: int = 15, rings: int = 3, histograms: int = 8, orientations: int = 8):
         self.step = step
         self.radius = radius
@@ -183,7 +183,7 @@ class DaisyDescriptor(KeypointDescriptorMaker):
             "orientations": self.orientations
         }
         
-class SIFTDescriptor(KeypointDescriptorMaker):
+class SIFTDescriptor(DescriptorComputer):
     def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6):
         self.n_features = n_features
         self.n_octave_layers = n_octave_layers
@@ -210,7 +210,7 @@ class SIFTDescriptor(KeypointDescriptorMaker):
             "edge_threshold": self.edge_threshold,
             "sigma": self.sigma
         }
-class BRISKDescriptor(KeypointDescriptorMaker):
+class BRISKDescriptor(DescriptorComputer):
     def __init__(self, thresh: int = 30, octaves: int = 3, pattern_scale: float = 1.0):
         self.thresh = thresh
         self.octaves = octaves
@@ -235,7 +235,7 @@ class BRISKDescriptor(KeypointDescriptorMaker):
         }
     
     
-class AKAZEDescriptor(KeypointDescriptorMaker):
+class AKAZEDescriptor(DescriptorComputer):
     def __init__(self, descriptor_type: int = cv2.AKAZE_DESCRIPTOR_MLDB, 
                  descriptor_size: int = 0, 
                  descriptor_channels: int = 3, 
@@ -282,7 +282,7 @@ class AKAZEDescriptor(KeypointDescriptorMaker):
             "diffusivity": self.diffusivity
         }
 
-class SURFDescriptor(KeypointDescriptorMaker):
+class SURFDescriptor(DescriptorComputer):
     """
     Note: SURF is part of the opencv-contrib-python package. 
     Ensure you have it installed for this class to work.
@@ -322,7 +322,7 @@ class SURFDescriptor(KeypointDescriptorMaker):
         }
         
 
-class PCASIFTDescriptor(KeypointDescriptorMaker):
+class PCASIFTDescriptor(DescriptorComputer):
     def __init__(self, 
                  num_components: int = 128, # A more common value than 128
                  n_features: int = 0, 
@@ -410,7 +410,7 @@ class PCASIFTDescriptor(KeypointDescriptorMaker):
         }
     
 
-class HOGDescriptor(KeypointDescriptorMaker):
+class HOGDescriptor(DescriptorComputer):
     """
     NOTE: HOG is a descriptor, not a keypoint detector. This class
     uses a SIFT detector to find keypoints, and then computes HOG
@@ -517,7 +517,7 @@ class HOGDescriptor(KeypointDescriptorMaker):
             "sigma": self.sigma
         }
 
-class GLOHDescriptor(KeypointDescriptorMaker):
+class GLOHDescriptor(DescriptorComputer):
     """
     GLOH Descriptor based on Medium article:
     "Exploring Gradient Location and Orientation Histogram (GLOH) for Image Recognition and Object Detection"
@@ -666,7 +666,6 @@ class DescriptorMatcher:
             self.matcher = cv2.FlannBasedMatcher(indexParams=index_params, searchParams=search_params)
             
     def match(self, descriptors1: np.ndarray, descriptors2: np.ndarray) -> list:
-        
         if descriptors1 is None or descriptors2 is None or len(descriptors1) == 0 or len(descriptors2) == 0:
             return []
         matches = self.matcher.knnMatch(descriptors1, descriptors2, k=2)
@@ -678,6 +677,32 @@ class DescriptorMatcher:
             if m.distance < self.ratio_test_threshold * n.distance:
                 good_matches.append(m)
         return good_matches
+    
+    def match_keypoints_descriptors(
+        self,
+        keypoints1: list,
+        descriptors1: np.ndarray,
+        keypoints2: list,
+        descriptors2: np.ndarray
+    ) -> tuple[list, np.ndarray, list, np.ndarray]:
+        if descriptors1 is None or descriptors2 is None or len(descriptors1) == 0 or len(descriptors2) == 0:
+            return [], np.array([]), [], np.array([])
+
+        matches = self.matcher.knnMatch(descriptors1, descriptors2, k=2)
+        good_kp1, good_desc1, good_kp2, good_desc2 = [], [], [], []
+
+        for m_n in matches:
+            if len(m_n) != 2:
+                continue
+            m, n = m_n
+            if m.distance < self.ratio_test_threshold * n.distance:
+                good_kp1.append(keypoints1[m.queryIdx])
+                good_kp2.append(keypoints2[m.trainIdx])
+                good_desc1.append(descriptors1[m.queryIdx])
+                good_desc2.append(descriptors2[m.trainIdx])
+
+        return good_kp1, np.array(good_desc1), good_kp2, np.array(good_desc2)
+
     
     def discard_painting(self, num_matches: int, threshold: int = 10) -> bool:
         #return True if the number of matches is less than the threshold
@@ -692,15 +717,35 @@ class DescriptorMatcher:
         }
             
 
+class Scorer(abc.ABC):
+    def __init__(self, matcher: DescriptorMatcher):
+        super().__init__()
+        self.matcher = matcher
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors, database_image: np.ndarray, database_keypoints, database_descriptors) -> tuple[bool, float, dict]:
+        pass
+
+    def to_dict(self) -> dict:
+        return {
+            'class': self.__class__.__name__,
+            'matcher': self.matcher.to_dict(),
+        }
+
 # FIXME: this score can be improved a lot, like #inliers / sqrt(#keypoints_q * #keypoints_db) which is more symetrical
-class HomographyScorer:
-    def __init__(self, ransac_thresh: float = 5.0, max_reproj_error: float = 5.0):
+class HomographyScorer(Scorer):
+    def __init__(self, matcher: DescriptorMatcher, ransac_thresh: float = 5.0, max_reproj_error: float = 5.0):
+        super().__init__(matcher)
         self.ransac_thresh = ransac_thresh
         self.max_reproj_error = max_reproj_error
 
-    def score(self, src_pts: np.ndarray, dst_pts: np.ndarray):
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors, database_image: np.ndarray, database_keypoints, database_descriptors):
+
+        src_pts, src_desc, dst_pts, dst_desc = self.matcher.match_keypoints_descriptors(query_keypoints, query_descriptors, database_keypoints, database_descriptors)
+
         if len(src_pts) < 4:
             return False, 0.0, {"reason": "not_enough_points"}
+
+        src_pts = np.float32([kpt.pt for kpt in src_pts])
+        dst_pts = np.float32([kpt.pt for kpt in dst_pts])
 
         M, mask = cv2.findHomography(src_pts, dst_pts, method=cv2.RANSAC, ransacReprojThreshold=self.ransac_thresh)
 
@@ -739,6 +784,46 @@ class HomographyScorer:
         }
 
         return valid, float(score), info
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d['ransac_thresh'] = self.ransac_thresh
+        d['max_reproj_error'] = self.max_reproj_error
+        return d
+
+
+class KeypointAndDescriptorMaker:
+    def __init__(self, *, descriptor_computer: DescriptorComputer, color_conversion: ColorConversion, preprocess: ImagePreprocessStep | None = None):
+
+        self.descriptor_computer = descriptor_computer
+        self.color_conversion = color_conversion
+        self.preprocess = preprocess
+
+
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
+        if mask is None:
+            mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
+
+        # image = image.astype(np.float32) / 255
+
+        if self.preprocess is not None:
+            preprocessed_image, preprocessed_mask = self.preprocess(image, mask)
+        else:
+            preprocessed_image, preprocessed_mask = image, mask
+
+        colorspace_image, preprocessed_mask = self.color_conversion(preprocessed_image, preprocessed_mask)
+        keypoints, descriptors = self.descriptor_computer.detect_and_compute(colorspace_image)
+        # for part in descriptor_parts:
+            # assert isclose(part.sum(), 1.0), f"The sum was {part.sum()}"
+        return keypoints, descriptors
+    
+    def to_dict(self) -> dict:
+        return {
+            'descriptor_computer': self.descriptor_computer.to_dict(),
+            'color_conversion': self.color_conversion.to_dict(),
+            'preprocess': self.preprocess.to_dict(),
+        }
+
 
 if __name__ == "__main__":
     

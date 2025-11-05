@@ -10,9 +10,9 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
 
 from libs_week4.descriptor import (
-    ORBDescriptor, DaisyDescriptor, SIFTDescriptor, BRISKDescriptor,
+    DescriptorComputer, HomographyScorer, ORBDescriptor, DaisyDescriptor, SIFTDescriptor, BRISKDescriptor,
     AKAZEDescriptor, PCASIFTDescriptor, HOGDescriptor, GLOHDescriptor,
-    DescriptorMatcher, KeypointDescriptorMaker
+    DescriptorMatcher, KeypointAndDescriptorMaker
 )
 from libs_week3.color_conversion import ColorConversion, ColorSpace
 import libs_week3.preprocessing as preprocessing
@@ -119,7 +119,7 @@ def generate_pcasift_configs() -> Iterator[Dict[str, Any]]:
         yield dict(zip(keys, v))
 
 
-def generate_keypoint_descriptors() -> Iterator[KeypointDescriptorMaker]:
+def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     """
     Generates instances of different keypoint descriptors by iterating
     through all their specified hyperparameter configurations.
@@ -188,14 +188,18 @@ def keypoint_hyperparameter_grid_search() -> Iterator[dict]:
                             'color_conversion': ColorConversion(targets=color_spaces, normalize=True),
                             'preprocess': preprocess,
                             'keypoint_descriptor': descriptor,
-                            'matcher': matcher
+                            'keypoint_and_descriptor_maker': KeypointAndDescriptorMaker(descriptor_computer=descriptor, color_conversion=ColorConversion(targets=color_spaces, normalize=True), preprocess=preprocess),
+                            'matcher': matcher,
+                            'scorer': HomographyScorer(matcher)
                         }
                     elif not is_float_desc and matcher.norm_type == cv2.NORM_HAMMING:
                         yield {
                             'color_conversion': ColorConversion(targets=color_spaces, normalize=True),
                             'preprocess': preprocess,
                             'keypoint_descriptor': descriptor,
-                            'matcher': matcher
+                            'keypoint_and_descriptor_maker': KeypointAndDescriptorMaker(descriptor_computer=descriptor, color_conversion=ColorConversion(targets=color_spaces, normalize=True), preprocess=preprocess),
+                            'matcher': matcher,
+                            'scorer': HomographyScorer(matcher)
                         }
 
 if __name__ == '__main__':
