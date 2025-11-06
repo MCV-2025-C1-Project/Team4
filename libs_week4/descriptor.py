@@ -249,21 +249,13 @@ class KeypointDescriptorMaker(abc.ABC):
         #Returns: keypoints: List of cv2.KeyPoint objects, descriptors: Array of shape (n_keypoints, descriptor_dim)
         pass
     
-    def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
-        if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
-        else:
-            gray = (image * 255).astype(np.uint8)
-        keypoints = self.finder.detect(gray, mask)
-        return keypoints 
-    
     @abc.abstractmethod
     def to_dict(self) -> dict[str, Any]:
         pass
 
 
 class ORBDescriptor(KeypointDescriptorMaker):
-    def __init__(self, finder: KeypointFinder = None, n_features: int = 500, scale_factor: float = 1.2, n_levels: int = 8):
+    def __init__(self, n_features: int = 500, scale_factor: float = 1.2, n_levels: int = 8, finder: KeypointFinder = None):
         self.finder = finder
         self.n_features = n_features
         self.scale_factor = scale_factor
@@ -305,7 +297,7 @@ class ORBDescriptor(KeypointDescriptorMaker):
         }
 
 class DaisyDescriptor(KeypointDescriptorMaker):
-    def __init__(self, finder: KeypointFinder = None, step: int = 4, radius: int = 15, rings: int = 3, histograms: int = 8, orientations: int = 8):
+    def __init__(self, step: int = 4, radius: int = 15, rings: int = 3, histograms: int = 8, orientations: int = 8, finder: KeypointFinder = None):
         self.finder = finder
         self.step = step
         self.radius = radius
@@ -377,7 +369,7 @@ class DaisyDescriptor(KeypointDescriptorMaker):
         }
         
 class SIFTDescriptor(KeypointDescriptorMaker):
-    def __init__(self, finder: KeypointFinder = None, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6):
+    def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6, finder: KeypointFinder = None):
         self.finder = finder
         self.n_features = n_features
         self.n_octave_layers = n_octave_layers
@@ -421,7 +413,7 @@ class SIFTDescriptor(KeypointDescriptorMaker):
             "sigma": self.sigma
         }
 class BRISKDescriptor(KeypointDescriptorMaker):
-    def __init__(self, finder: KeypointFinder = None, thresh: int = 30, octaves: int = 3, pattern_scale: float = 1.0):
+    def __init__(self, thresh: int = 30, octaves: int = 3, pattern_scale: float = 1.0, finder: KeypointFinder = None):
         self.finder = finder
         self.thresh = thresh
         self.octaves = octaves
@@ -463,13 +455,14 @@ class BRISKDescriptor(KeypointDescriptorMaker):
     
     
 class AKAZEDescriptor(KeypointDescriptorMaker):
-    def __init__(self, finder: KeypointFinder = None, descriptor_type: int = cv2.AKAZE_DESCRIPTOR_MLDB, 
-                 descriptor_size: int = 0, 
-                 descriptor_channels: int = 3, 
-                 threshold: float = 0.001, 
-                 n_octaves: int = 4, 
-                 n_octave_layers: int = 4, 
-                 diffusivity: int = cv2.KAZE_DIFF_PM_G2):
+    def __init__(self, descriptor_type: int = cv2.AKAZE_DESCRIPTOR_MLDB, 
+                descriptor_size: int = 0, 
+                descriptor_channels: int = 3, 
+                threshold: float = 0.001, 
+                n_octaves: int = 4, 
+                n_octave_layers: int = 4, 
+                diffusivity: int = cv2.KAZE_DIFF_PM_G2,
+                finder: KeypointFinder = None):
         
         self.descriptor_type = descriptor_type
         self.descriptor_size = descriptor_size
@@ -534,8 +527,8 @@ class SURFDescriptor(KeypointDescriptorMaker):
     Note: SURF is part of the opencv-contrib-python package. 
     Ensure you have it installed for this class to work.
     """
-    def __init__(self, finder: KeypointFinder = None, hessian_threshold: float = 100, n_octaves: int = 4, 
-                n_octave_layers: int = 3, extended: bool = False, upright: bool = False):
+    def __init__(self, hessian_threshold: float = 100, n_octaves: int = 4, 
+                n_octave_layers: int = 3, extended: bool = False, upright: bool = False, finder: KeypointFinder = None):
         self.finder = finder
         self.hessian_threshold = hessian_threshold
         self.n_octaves = n_octaves
@@ -590,13 +583,13 @@ class SURFDescriptor(KeypointDescriptorMaker):
 
 class PCASIFTDescriptor(KeypointDescriptorMaker):
     def __init__(self, 
-                finder: KeypointFinder = None,
                 num_components: int = 128, # A more common value than 128
                 n_features: int = 0, 
                 n_octave_layers: int = 3, 
                 contrast_threshold: float = 0.04, 
                 edge_threshold: float = 10, 
-                sigma: float = 1.6):
+                sigma: float = 1.6,
+                finder: KeypointFinder = None):
         self.finder = finder
         
         # SIFT parameters
@@ -735,12 +728,12 @@ class HOGDescriptor(KeypointDescriptorMaker):
     """
     def __init__(self,
                 # HOG descriptor parameters
-                finder: KeypointFinder = None,
                 win_size: tuple[int, int] = (32, 32),
                 block_size: tuple[int, int] = (16, 16),
                 block_stride: tuple[int, int] = (8, 8),
                 cell_size: tuple[int, int] = (8, 8),
-                nbins: int = 9):
+                nbins: int = 9,
+                finder: KeypointFinder = None):
 
         self.finder = finder
         # Store HOG parameters
@@ -862,7 +855,6 @@ class GLOHDescriptor(KeypointDescriptorMaker):
     (medium.com/@vincentchung_72457/exploring-gradient-location-orientation-histogram-gloh-for-image-recognition-and-object-detection-3e3c231a5b01)
     """
     def __init__(self,
-                finder: KeypointFinder = None,
                 nbins: int = 36,
                 
                 # SIFT detector parameters
@@ -870,7 +862,8 @@ class GLOHDescriptor(KeypointDescriptorMaker):
                 n_octave_layers: int = 3,
                 contrast_threshold: float = 0.04,
                 edge_threshold: float = 10,
-                sigma: float = 1.6):
+                sigma: float = 1.6,
+                finder: KeypointFinder = None):
 
         self.finder = finder
 
