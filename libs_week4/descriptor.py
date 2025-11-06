@@ -9,7 +9,7 @@ from skimage.feature import local_binary_pattern
 import pywt
 from skimage.feature import daisy
 from sklearn.decomposition import PCA
-# from cv2 import xfeatures2d
+from cv2 import xfeatures2d
 
 from libs_week3.color_conversion import ColorConversion, ColorSpace
 from libs_week3.preprocessing import ImagePreprocessStep
@@ -815,10 +815,15 @@ class Scorer(abc.ABC):
 
 # FIXME: this score can be improved a lot, like #inliers / sqrt(#keypoints_q * #keypoints_db) which is more symetrical
 class HomographyScorer(Scorer):
-    def __init__(self, matcher: DescriptorMatcher, ransac_thresh: float = 5.0, max_reproj_error: float = 5.0):
+    def __init__(self, matcher: DescriptorMatcher, 
+                 ransac_thresh: float = 5.0, 
+                 max_reproj_error: float = 5.0,
+                 use_reproj_error_penalty: bool = True):
+        
         super().__init__(matcher)
         self.ransac_thresh = ransac_thresh
         self.max_reproj_error = max_reproj_error
+        self.use_reproj_error_penalty = use_reproj_error_penalty
 
     def score(self, query_image: np.ndarray, query_keypoints, query_descriptors, database_image: np.ndarray, database_keypoints, database_descriptors):
 
@@ -850,15 +855,18 @@ class HomographyScorer(Scorer):
         reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
 
         det = np.linalg.det(M[:2, :2])
-        # TODO: the hardcoded 10 can probably be computed from the ratio of the #pixels of both images
-        if det <= 0.4 or det > 10: # negative det is a flip, det too large or too small is bad too
+        if det <= 0.4 or det > 10:  # Negative det is a flip, det too large/small is bad
             valid = False
         elif reproj_error > self.max_reproj_error:
             valid = False
         else:
             valid = True
 
-        score = inlier_ratio * np.exp(-0.5 * (reproj_error / self.max_reproj_error))
+        # Calculate score based on configuration
+        if self.use_reproj_error_penalty:
+            score = inlier_ratio * np.exp(-0.5 * (reproj_error / self.max_reproj_error))
+        else:
+            score = inlier_ratio
 
         info = {
             "n_inliers": int(n_inliers),
@@ -866,6 +874,7 @@ class HomographyScorer(Scorer):
             "inlier_ratio": float(inlier_ratio),
             "reproj_error": float(reproj_error),
             "det": float(det),
+            "use_reproj_error_penalty": self.use_reproj_error_penalty
         }
 
         return valid, float(score), info
@@ -874,6 +883,7 @@ class HomographyScorer(Scorer):
         d = super().to_dict()
         d['ransac_thresh'] = self.ransac_thresh
         d['max_reproj_error'] = self.max_reproj_error
+        d['use_reproj_error_penalty'] = self.use_reproj_error_penalty
         return d
 
 
@@ -988,4 +998,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"ArticleGLOHDescriptor FAILED. Error: {e}")
         print("This might be because the internal SIFT detector failed.")
-        
