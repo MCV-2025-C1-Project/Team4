@@ -58,6 +58,9 @@ def get_colorspace_ranges(color_space: 'ColorSpace') -> list[tuple[float, float]
     Note: These ranges are for NORMALIZED (0-1) images after dividing by 255.
     OpenCV cvtColor works on uint8 [0-255] or float32 [0-1] differently.
     """
+    if color_space == ColorSpace.BGR:
+        return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
+    
     if color_space == ColorSpace.RGB:
         return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
 
@@ -125,7 +128,7 @@ class ORBDescriptor(DescriptorComputer):
         
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -150,7 +153,7 @@ class DaisyDescriptor(DescriptorComputer):
         
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -194,7 +197,7 @@ class SIFTDescriptor(DescriptorComputer):
         
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -210,6 +213,45 @@ class SIFTDescriptor(DescriptorComputer):
             "edge_threshold": self.edge_threshold,
             "sigma": self.sigma
         }
+
+class RootSIFTDescriptor(DescriptorComputer):
+    def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6):
+        self.n_features = n_features
+        self.n_octave_layers = n_octave_layers
+        self.contrast_threshold = contrast_threshold
+        self.edge_threshold = edge_threshold
+        self.sigma = sigma
+        self.sift = cv2.SIFT_create(nfeatures=n_features, nOctaveLayers=n_octave_layers, contrastThreshold=contrast_threshold, edgeThreshold=edge_threshold, sigma=sigma)
+
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+
+        keypoints, descriptors = self.sift.detectAndCompute(gray, mask)
+
+        if descriptors is None or len(descriptors) == 0:
+            return keypoints, descriptors
+
+        # RootSIFT: Apply square root after L1 normalization
+        # L1 normalize
+        descriptors = descriptors / (descriptors.sum(axis=1, keepdims=True) + 1e-7)
+        # Element-wise square root
+        descriptors = np.sqrt(descriptors)
+
+        return keypoints, descriptors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "RootSIFT",
+            "n_features": self.n_features,
+            "n_octave_layers": self.n_octave_layers,
+            "contrast_threshold": self.contrast_threshold,
+            "edge_threshold": self.edge_threshold,
+            "sigma": self.sigma
+        }
+
 class BRISKDescriptor(DescriptorComputer):
     def __init__(self, thresh: int = 30, octaves: int = 3, pattern_scale: float = 1.0):
         self.thresh = thresh
@@ -219,7 +261,7 @@ class BRISKDescriptor(DescriptorComputer):
         
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -235,6 +277,46 @@ class BRISKDescriptor(DescriptorComputer):
         }
     
     
+class KAZEDescriptor(DescriptorComputer):
+    def __init__(self, extended: bool = False, upright: bool = False,
+                 threshold: float = 0.001, n_octaves: int = 4,
+                 n_octave_layers: int = 4, diffusivity: int = cv2.KAZE_DIFF_PM_G2):
+
+        self.extended = extended
+        self.upright = upright
+        self.threshold = threshold
+        self.n_octaves = n_octaves
+        self.n_octave_layers = n_octave_layers
+        self.diffusivity = diffusivity
+        self.kaze = cv2.KAZE_create(
+            extended=extended,
+            upright=upright,
+            threshold=threshold,
+            nOctaves=n_octaves,
+            nOctaveLayers=n_octave_layers,
+            diffusivity=diffusivity
+        )
+
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+
+        keypoints, descriptors = self.kaze.detectAndCompute(gray, mask)
+        return keypoints, descriptors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "KAZE",
+            "extended": self.extended,
+            "upright": self.upright,
+            "threshold": self.threshold,
+            "n_octaves": self.n_octaves,
+            "n_octave_layers": self.n_octave_layers,
+            "diffusivity": self.diffusivity
+        }
+
 class AKAZEDescriptor(DescriptorComputer):
     def __init__(self, descriptor_type: int = cv2.AKAZE_DESCRIPTOR_MLDB, 
                  descriptor_size: int = 0, 
@@ -263,7 +345,7 @@ class AKAZEDescriptor(DescriptorComputer):
         
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -294,7 +376,7 @@ class SURFDescriptor(DescriptorComputer):
         self.n_octave_layers = n_octave_layers
         self.extended = extended
         self.upright = upright
-        self.surf = xfeatures2d.SURF_create(
+        self.surf = cv2.xfeatures2d.SURF_create(
             hessianThreshold=hessian_threshold,
             nOctaves=n_octaves,
             nOctaveLayers=n_octave_layers,
@@ -304,7 +386,7 @@ class SURFDescriptor(DescriptorComputer):
 
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
             
@@ -362,7 +444,7 @@ class PCASIFTDescriptor(DescriptorComputer):
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -476,7 +558,7 @@ class HOGDescriptor(DescriptorComputer):
         at those keypoint locations.
         """
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -494,6 +576,7 @@ class HOGDescriptor(DescriptorComputer):
             return keypoints, np.array([])
             
 
+        descriptors = descriptors.reshape((len(locations), self.hog.getDescriptorSize()))
         descriptors = cv2.normalize(descriptors, None, norm_type=cv2.NORM_L2)
 
         return keypoints, descriptors
@@ -567,7 +650,7 @@ class GLOHDescriptor(DescriptorComputer):
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list[cv2.KeyPoint], np.ndarray]:
         # BASED ON: medium.com/@vincentchung_72457/exploring-gradient-location-orientation-histogram-gloh-for-image-recognition-and-object-detection-3e3c231a5b01
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB_GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         

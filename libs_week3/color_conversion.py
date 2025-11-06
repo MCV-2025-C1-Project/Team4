@@ -5,6 +5,7 @@ from libs_week3.preprocessing import ImagePreprocessStep
 
 
 class ColorSpace(enum.Enum):
+    BGR = 'BGR'
     RGB = 'RGB'
     # GRAY = 'GRAY'
     HSV = 'HSV'
@@ -53,6 +54,10 @@ class ColorConversion(ImagePreprocessStep):
         channel_images = []
         for color_space in self.targets:
             match color_space:
+                case ColorSpace.BGR:
+                    converted = image
+                    if self.normalize:
+                        converted = converted.astype(np.float32) / 255.0
                 case ColorSpace.RGB:
                     converted = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                     if self.normalize:
