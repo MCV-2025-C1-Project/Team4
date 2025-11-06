@@ -120,11 +120,24 @@ class DescriptorComputer(abc.ABC):
 
 
 class ORBDescriptor(DescriptorComputer):
-    def __init__(self, n_features: int = 500, scale_factor: float = 1.2, n_levels: int = 8):
+    def __init__(self, n_features: int = 500, scale_factor: float = 1.2, n_levels: int = 8,
+                 wta_k: int = 2, score_type: int = cv2.ORB_HARRIS_SCORE, patch_size: int = 31):
         self.n_features = n_features
         self.scale_factor = scale_factor
         self.n_levels = n_levels
-        self.orb = cv2.ORB_create(nfeatures=n_features, scaleFactor=scale_factor, nlevels=n_levels)
+        self.wta_k = wta_k
+        self.score_type = score_type
+        self.patch_size = patch_size
+        self.orb = cv2.ORB_create(
+            nfeatures=n_features,
+            scaleFactor=scale_factor,
+            nlevels=n_levels,
+            edgeThreshold=patch_size,  # Should be equal to patchSize
+            firstLevel=0,
+            WTA_K=wta_k,
+            scoreType=score_type,
+            patchSize=patch_size
+        )
         
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
@@ -136,11 +149,15 @@ class ORBDescriptor(DescriptorComputer):
         return keypoints, descriptors
     
     def to_dict(self) -> dict[str, Any]:
+        score_type_name = "HARRIS" if self.score_type == cv2.ORB_HARRIS_SCORE else "FAST"
         return {
             "type": "ORB",
             "n_features": self.n_features,
             "scale_factor": self.scale_factor,
-            "n_levels": self.n_levels
+            "n_levels": self.n_levels,
+            "wta_k": self.wta_k,
+            "score_type": score_type_name,
+            "patch_size": self.patch_size
         }
 
 class DaisyDescriptor(DescriptorComputer):

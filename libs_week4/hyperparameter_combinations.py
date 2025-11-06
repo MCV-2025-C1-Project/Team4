@@ -28,6 +28,9 @@ def generate_orb_configs() -> Iterator[Dict[str, Any]]:
         'n_features': [500, 1000, 2000, 3000, 5000],
         'scale_factor': [1.1, 1.2, 1.5],
         'n_levels': [8, 10, 12],
+        'wta_k': [2, 3, 4],  # WTA_K: 2=default (256 bit), 3=384 bit, 4=512 bit descriptors
+        'score_type': [cv2.ORB_HARRIS_SCORE],  # Could also try cv2.ORB_FAST_SCORE
+        'patch_size': [31]  # Default is 31, could try [15, 31, 45] for variation
     }
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
