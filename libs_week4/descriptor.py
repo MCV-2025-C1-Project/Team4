@@ -9,7 +9,7 @@ from skimage.feature import local_binary_pattern
 import pywt
 from skimage.feature import daisy, hog
 from sklearn.decomposition import PCA
-# from cv2 import xfeatures2d
+from cv2 import xfeatures2d
 
 # from libs_week3.color_conversion import ColorConversion, ColorSpace
 # from libs_week3.preprocessing import ImagePreprocessStep
@@ -216,53 +216,6 @@ class HarrisLaplacianFinder(KeypointFinder):
 
     def to_dict(self) -> dict[str, Any]:
         return {"type": "HARRIS_LAPLACIAN", "scales": self.scales, "harris_kwargs": self.harris_kwargs}
-
-
-class DoGFinder(KeypointFinder):
-    def __init__(self, num_scales: int = 5, sigma0: float = 1.6, k: float = 1.2, thresh: float = 0.03):
-        self.num_scales = num_scales
-        self.sigma0 = sigma0
-        self.k = k
-        self.thresh = thresh
-
-    def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
-        if len(image.shape) == 3:
-            gray0 = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
-        else:
-            gray0 = (image * 255).astype(np.uint8)
-
-        # build scale-space gaussian images
-        gaussians = []
-        sigmas = [self.sigma0 * (self.k ** i) for i in range(self.num_scales)]
-        for s in sigmas:
-            ksize = int(max(3, round(s * 3)) | 1)
-            gaussians.append(cv2.GaussianBlur(gray0, (ksize, ksize), sigmaX=s))
-
-        # compute DoG images
-        dogs = [cv2.subtract(gaussians[i+1].astype(np.float32), gaussians[i].astype(np.float32)) for i in range(len(gaussians)-1)]
-
-        keypoints = []
-        h, w = gray0.shape
-        # For each DoG image, find local extrema by simple 3x3 neighborhood (no subpixel refinement).
-        for idx, dog in enumerate(dogs):
-            absdog = np.abs(dog)
-            # threshold by fraction of max
-            mask_dog = (absdog > (self.thresh * absdog.max())).astype(np.uint8)
-            # local maxima: compare to dilated image
-            dil = cv2.dilate(absdog, np.ones((3, 3)))
-            local_max = (absdog == dil).astype(np.uint8)
-            candidates_mask = (mask_dog & local_max).astype(np.uint8)
-            ys, xs = np.where(candidates_mask)
-            scale = sigmas[idx]
-            for (y, x) in zip(ys, xs):
-                keypoints.append(cv2.KeyPoint(float(x), float(y), size=float(scale * 6.0)))
-        # optional: limit number of keypoints
-        if len(keypoints) > 1000:
-            keypoints = keypoints[:1000]
-        return keypoints
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"type": "DoG", "num_scales": self.num_scales, "sigma0": self.sigma0, "k": self.k, "thresh": self.thresh}
 
 
 class SIFTFinder(KeypointFinder):
@@ -557,7 +510,7 @@ class AKAZEDescriptor(KeypointDescriptorMaker):
             gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
-        
+        [setattr(kp, 'class_id', 0) for kp in keypoints] # in akaze compute func the class_id of the keypoints can't be -1(the default value). It needs to be changed to a different value than -1.
         _, descriptors = self.akaze.compute(gray, keypoints)
         return descriptors
 
@@ -582,7 +535,7 @@ class SURFDescriptor(KeypointDescriptorMaker):
     Ensure you have it installed for this class to work.
     """
     def __init__(self, finder: KeypointFinder = None, hessian_threshold: float = 100, n_octaves: int = 4, 
-                 n_octave_layers: int = 3, extended: bool = False, upright: bool = False):
+                n_octave_layers: int = 3, extended: bool = False, upright: bool = False):
         self.finder = finder
         self.hessian_threshold = hessian_threshold
         self.n_octaves = n_octaves
@@ -729,7 +682,7 @@ class PCASIFTDescriptor(KeypointDescriptorMaker):
             gray = (image * 255).astype(np.uint8)
         
         # 1. Detect keypoints and compute SIFT descriptors
-        keypoints, descriptors = self.sift.detectAndCompute(gray, mask)
+        keypoints, descriptors = self.sift.compute(gray, keypoints)
         
         if descriptors is None or len(descriptors) == 0:
             return keypoints
@@ -877,11 +830,7 @@ class HOGDescriptor(KeypointDescriptorMaker):
             # El reshape este ha salido de un post de StackOverflow, no de la docu oficial de opencv xddddd
             # https://stackoverflow.com/questions/22373707/why-does-opencvs-hog-descriptor-return-so-many-values
             
-            descriptors = descriptors_flat.reshape(N,self.nbins, 
-                (self.block_size[0] // self.cell_size[0]), 
-                (self.block_size[1] // self.cell_size[1]),
-                ((self.win_size[0] - self.block_size[0]) // self.block_stride[0] + 1),
-                ((self.win_size[1] - self.block_size[1]) // self.block_stride[1] + 1)
+            descriptors = descriptors_flat.reshape(N,self.hog.getDescriptorSize()
             )
         return descriptors
     
@@ -1159,7 +1108,6 @@ if __name__ == "__main__":
     finders = [
         HarrisFinder(thresh=0.01),
         HarrisLaplacianFinder(scales=[1.0, 1.6, 2.0, 2.8], harris_thresh=0.01),
-        DoGFinder(num_scales=5, sigma0=1.6, k=1.2, thresh=0.03),
         SIFTFinder(n_features=500)
     ]
 
