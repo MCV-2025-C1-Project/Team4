@@ -214,13 +214,30 @@ def generate_preprocess_strategies() -> list[preprocessing.ImagePreprocessStep |
     ]
 
 def generate_descriptor_matchers() -> Iterator[DescriptorMatcher]:
-    for cross_check in [False]:
-        yield DescriptorMatcher(matcher_type='BF', norm_type=cv2.NORM_L2, ratio_test_threshold=0.75, cross_check=cross_check)
-        # yield DescriptorMatcher(matcher_type='FLANN', norm_type=cv2.NORM_L2, ratio_test_threshold=0.75, cross_check=cross_check)
+    # Vary ratio test threshold to test matching strictness
+    for ratio_threshold in [0.7, 0.75, 0.8]:
+        for cross_check in [False]:
+            yield DescriptorMatcher(matcher_type='BF', norm_type=cv2.NORM_L2, ratio_test_threshold=ratio_threshold, cross_check=cross_check)
+            # yield DescriptorMatcher(matcher_type='FLANN', norm_type=cv2.NORM_L2, ratio_test_threshold=ratio_threshold, cross_check=cross_check)
 
-        yield DescriptorMatcher(matcher_type='BF', norm_type=cv2.NORM_HAMMING, ratio_test_threshold=0.75, cross_check=cross_check)
-        # yield DescriptorMatcher(matcher_type='FLANN', norm_type=cv2.NORM_HAMMING, ratio_test_threshold=0.75, cross_check=cross_check)
+            yield DescriptorMatcher(matcher_type='BF', norm_type=cv2.NORM_HAMMING, ratio_test_threshold=ratio_threshold, cross_check=cross_check)
+            # yield DescriptorMatcher(matcher_type='FLANN', norm_type=cv2.NORM_HAMMING, ratio_test_threshold=ratio_threshold, cross_check=cross_check)
 
+def generate_homography_scorer_configs() -> Iterator[Dict[str, Any]]:
+    """
+    Generate configurations for HomographyScorer parameters.
+    NOTE: These will be combined with matchers in the grid search.
+    For now keeping a simple grid, but can be expanded later.
+    """
+    param_grid = {
+        'ransac_thresh': [3.0, 5.0, 8.0],
+        'max_reproj_error': [3.0, 5.0, 8.0],
+        'use_reproj_error_penalty': [True],
+        'min_points': [15, 20, 30]
+    }
+    keys, values = zip(*param_grid.items())
+    for v in itertools.product(*values):
+        yield dict(zip(keys, v))
 
 def keypoint_hyperparameter_grid_search() -> Iterator[dict]:
     """
@@ -234,28 +251,29 @@ def keypoint_hyperparameter_grid_search() -> Iterator[dict]:
             # The 'generate_keypoint_descriptors' function now does all the hard work
             for descriptor in generate_keypoint_descriptors():
                 for matcher in generate_descriptor_matchers():
-                    descriptor_type_name = descriptor.to_dict()['type']
-                    is_float_desc = any(s in descriptor_type_name for s in float_descriptors)
+                    for scorer_config in generate_homography_scorer_configs():
+                        descriptor_type_name = descriptor.to_dict()['type']
+                        is_float_desc = any(s in descriptor_type_name for s in float_descriptors)
 
-                    # --- Compatibility Check ---
-                    if is_float_desc and matcher.norm_type == cv2.NORM_L2:
-                        yield {
-                            'color_conversion': ColorConversion(targets=color_spaces, normalize=True),
-                            'preprocess': preprocess,
-                            'keypoint_descriptor': descriptor,
-                            'keypoint_and_descriptor_maker': KeypointAndDescriptorMaker(descriptor_computer=descriptor, color_conversion=ColorConversion(targets=color_spaces, normalize=True), preprocess=preprocess),
-                            'matcher': matcher,
-                            'scorer': HomographyScorer(matcher)
-                        }
-                    elif not is_float_desc and matcher.norm_type == cv2.NORM_HAMMING:
-                        yield {
-                            'color_conversion': ColorConversion(targets=color_spaces, normalize=True),
-                            'preprocess': preprocess,
-                            'keypoint_descriptor': descriptor,
-                            'keypoint_and_descriptor_maker': KeypointAndDescriptorMaker(descriptor_computer=descriptor, color_conversion=ColorConversion(targets=color_spaces, normalize=True), preprocess=preprocess),
-                            'matcher': matcher,
-                            'scorer': HomographyScorer(matcher)
-                        }
+                        # --- Compatibility Check ---
+                        if is_float_desc and matcher.norm_type == cv2.NORM_L2:
+                            yield {
+                                'color_conversion': ColorConversion(targets=color_spaces, normalize=True),
+                                'preprocess': preprocess,
+                                'keypoint_descriptor': descriptor,
+                                'keypoint_and_descriptor_maker': KeypointAndDescriptorMaker(descriptor_computer=descriptor, color_conversion=ColorConversion(targets=color_spaces, normalize=True), preprocess=preprocess),
+                                'matcher': matcher,
+                                'scorer': HomographyScorer(matcher, **scorer_config)
+                            }
+                        elif not is_float_desc and matcher.norm_type == cv2.NORM_HAMMING:
+                            yield {
+                                'color_conversion': ColorConversion(targets=color_spaces, normalize=True),
+                                'preprocess': preprocess,
+                                'keypoint_descriptor': descriptor,
+                                'keypoint_and_descriptor_maker': KeypointAndDescriptorMaker(descriptor_computer=descriptor, color_conversion=ColorConversion(targets=color_spaces, normalize=True), preprocess=preprocess),
+                                'matcher': matcher,
+                                'scorer': HomographyScorer(matcher, **scorer_config)
+                            }
 
 if __name__ == '__main__':
     print("="*50)

@@ -832,22 +832,24 @@ class Scorer(abc.ABC):
 
 # FIXME: this score can be improved a lot, like #inliers / sqrt(#keypoints_q * #keypoints_db) which is more symetrical
 class HomographyScorer(Scorer):
-    def __init__(self, matcher: DescriptorMatcher, 
-                 ransac_thresh: float = 5.0, 
+    def __init__(self, matcher: DescriptorMatcher,
+                 ransac_thresh: float = 5.0,
                  max_reproj_error: float = 5.0,
-                 use_reproj_error_penalty: bool = True):
-        
+                 use_reproj_error_penalty: bool = True,
+                 min_points: int = 20):
+
         super().__init__(matcher)
         self.ransac_thresh = ransac_thresh
         self.max_reproj_error = max_reproj_error
         self.use_reproj_error_penalty = use_reproj_error_penalty
+        self.min_points = min_points
 
     def score(self, query_image: np.ndarray, query_keypoints, query_descriptors, database_image: np.ndarray, database_keypoints, database_descriptors):
 
         src_kpts, src_desc, dst_kpts, dst_desc = self.matcher.match_keypoints_descriptors(query_keypoints, query_descriptors, database_keypoints, database_descriptors)
 
-        # check if the homography can be computed in a stable manner, with less than 20 points it may find homographies that can be "whatever"
-        if len(src_kpts) < 20: # TODO: this 20 can increase to 50 or so
+        # check if the homography can be computed in a stable manner, with less than min_points it may find homographies that can be "whatever"
+        if len(src_kpts) < self.min_points:
             return False, 0.0, {"reason": "not_enough_points"}
 
         src_pts = np.float32([kpt.pt for kpt in src_kpts])
@@ -901,6 +903,7 @@ class HomographyScorer(Scorer):
         d['ransac_thresh'] = self.ransac_thresh
         d['max_reproj_error'] = self.max_reproj_error
         d['use_reproj_error_penalty'] = self.use_reproj_error_penalty
+        d['min_points'] = self.min_points
         return d
 
 
