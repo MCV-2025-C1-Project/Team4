@@ -25,7 +25,12 @@ class ColorSpace(enum.Enum):
     LUV = 'LUV'
     XYZ = 'XYZ'
     YUV = 'YUV'
-    
+
+class DescriptorValueType(enum.Enum):
+    """Enum to distinguish between float and binary descriptors for proper matching."""
+    FLOAT = "float"
+    BINARY = "binary"
+
 def flatten_list(l):
     res = []
 
@@ -70,6 +75,9 @@ def get_colorspace_ranges(color_space: 'ColorSpace') -> list[tuple[float, float]
     Note: These ranges are for NORMALIZED (0-1) images after dividing by 255.
     OpenCV cvtColor works on uint8 [0-255] or float32 [0-1] differently.
     """
+    if color_space == ColorSpace.BGR:
+        return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
+    
     if color_space == ColorSpace.RGB:
         return [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)]
 
@@ -239,7 +247,7 @@ class SIFTFinder(KeypointFinder):
         return {"type": "SIFT", "n_features": self.sift.getNFeatures(), "n_octave_layers": self.sift.getNOctaveLayers(),
                 "contrast_threshold": self.sift.getContrastThreshold(), "edge_threshold": self.sift.getEdgeThreshold(), "sigma": self.sift.getSigma()}
 
-class KeypointDescriptorMaker(abc.ABC):
+class DescriptorComputer(abc.ABC):
     #keypoint descriptor class
     
     @abc.abstractmethod
@@ -253,19 +261,36 @@ class KeypointDescriptorMaker(abc.ABC):
     def to_dict(self) -> dict[str, Any]:
         pass
 
+    @abc.abstractmethod
+    def get_value_type(self) -> DescriptorValueType:
+        """Returns whether this descriptor produces float or binary values."""
+        pass
 
-class ORBDescriptor(KeypointDescriptorMaker):
-    def __init__(self, n_features: int = 500, scale_factor: float = 1.2, n_levels: int = 8, finder: KeypointFinder = None):
+
+class ORBDescriptor(DescriptorComputer):
+    def __init__(self, n_features: int = 500, scale_factor: float = 1.2, n_levels: int = 8,
+                 wta_k: int = 2, score_type: int = cv2.ORB_HARRIS_SCORE, patch_size: int = 31, finder: KeypointFinder = None):
         self.finder = finder
         self.n_features = n_features
         self.scale_factor = scale_factor
         self.n_levels = n_levels
-        self.orb = cv2.ORB_create(nfeatures=n_features, scaleFactor=scale_factor, nlevels=n_levels)
-        
+        self.wta_k = wta_k
+        self.score_type = score_type
+        self.patch_size = patch_size
+        self.orb = cv2.ORB_create(
+            nfeatures=n_features,
+            scaleFactor=scale_factor,
+            nlevels=n_levels,
+            edgeThreshold=patch_size,  # Should be equal to patchSize
+            firstLevel=0,
+            WTA_K=wta_k,
+            scoreType=score_type,
+            patchSize=patch_size
+        )
         
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -274,7 +299,7 @@ class ORBDescriptor(KeypointDescriptorMaker):
     
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         keypoints = self.finder.detect(gray, mask)
@@ -282,21 +307,28 @@ class ORBDescriptor(KeypointDescriptorMaker):
     
     def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint], mask: np.ndarray | None = None) -> np.ndarray:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         _, descriptors = self.orb.compute(gray, keypoints)
         return descriptors
     
     def to_dict(self) -> dict[str, Any]:
+        score_type_name = "HARRIS" if self.score_type == cv2.ORB_HARRIS_SCORE else "FAST"
         return {
             "type": "ORB",
             "n_features": self.n_features,
             "scale_factor": self.scale_factor,
-            "n_levels": self.n_levels
+            "n_levels": self.n_levels,
+            "wta_k": self.wta_k,
+            "score_type": score_type_name,
+            "patch_size": self.patch_size
         }
 
-class DaisyDescriptor(KeypointDescriptorMaker):
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.BINARY
+
+class DaisyDescriptor(DescriptorComputer):
     def __init__(self, step: int = 4, radius: int = 15, rings: int = 3, histograms: int = 8, orientations: int = 8, finder: KeypointFinder = None):
         self.finder = finder
         self.step = step
@@ -307,7 +339,7 @@ class DaisyDescriptor(KeypointDescriptorMaker):
         
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -332,7 +364,7 @@ class DaisyDescriptor(KeypointDescriptorMaker):
     
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -342,7 +374,7 @@ class DaisyDescriptor(KeypointDescriptorMaker):
     
     def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint], mask: np.ndarray | None = None) -> np.ndarray:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -367,8 +399,11 @@ class DaisyDescriptor(KeypointDescriptorMaker):
             "histograms": self.histograms,
             "orientations": self.orientations
         }
-        
-class SIFTDescriptor(KeypointDescriptorMaker):
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
+class SIFTDescriptor(DescriptorComputer):
     def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6, finder: KeypointFinder = None):
         self.finder = finder
         self.n_features = n_features
@@ -377,19 +412,19 @@ class SIFTDescriptor(KeypointDescriptorMaker):
         self.edge_threshold = edge_threshold
         self.sigma = sigma
         self.sift = cv2.SIFT_create(nfeatures=n_features, nOctaveLayers=n_octave_layers, contrastThreshold=contrast_threshold, edgeThreshold=edge_threshold, sigma=sigma)
-        
+
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
             gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
-        
+
         keypoints, descriptors = self.sift.detectAndCompute(gray, mask)
         return keypoints, descriptors
-    
+
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         keypoints = self.finder.detect(gray, mask)
@@ -397,7 +432,7 @@ class SIFTDescriptor(KeypointDescriptorMaker):
     
     def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint], mask: np.ndarray | None = None) -> np.ndarray:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         _, descriptors = self.sift.compute(gray, keypoints)
@@ -412,26 +447,101 @@ class SIFTDescriptor(KeypointDescriptorMaker):
             "edge_threshold": self.edge_threshold,
             "sigma": self.sigma
         }
-class BRISKDescriptor(KeypointDescriptorMaker):
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
+class RootSIFTDescriptor(DescriptorComputer):
+    def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6, finder: KeypointFinder = None):
+        self.finder = finder
+        self.n_features = n_features
+        self.n_octave_layers = n_octave_layers
+        self.contrast_threshold = contrast_threshold
+        self.edge_threshold = edge_threshold
+        self.sigma = sigma
+        self.sift = cv2.SIFT_create(nfeatures=n_features, nOctaveLayers=n_octave_layers, contrastThreshold=contrast_threshold, edgeThreshold=edge_threshold, sigma=sigma)
+
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+
+        keypoints, descriptors = self.sift.detectAndCompute(gray, mask)
+
+        if descriptors is None or len(descriptors) == 0:
+            return keypoints, descriptors
+
+        # RootSIFT: Apply square root after L1 normalization
+        # L1 normalize
+        descriptors = descriptors / (descriptors.sum(axis=1, keepdims=True) + 1e-7)
+        # Element-wise square root
+        descriptors = np.sqrt(descriptors)
+
+        return keypoints, descriptors
+
+    def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+        keypoints = self.finder.detect(gray, mask)
+        return keypoints  
+    
+    def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint], mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+
+        descriptors = self.sift.compute(gray, keypoints)
+
+        if descriptors is None or len(descriptors) == 0:
+            return descriptors
+
+        # RootSIFT: Apply square root after L1 normalization
+        # L1 normalize
+        descriptors = descriptors / (descriptors.sum(axis=1, keepdims=True) + 1e-7)
+        # Element-wise square root
+        descriptors = np.sqrt(descriptors)
+
+        return descriptors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "RootSIFT",
+            "n_features": self.n_features,
+            "n_octave_layers": self.n_octave_layers,
+            "contrast_threshold": self.contrast_threshold,
+            "edge_threshold": self.edge_threshold,
+            "sigma": self.sigma
+        }
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
+
+
+class BRISKDescriptor(DescriptorComputer):
     def __init__(self, thresh: int = 30, octaves: int = 3, pattern_scale: float = 1.0, finder: KeypointFinder = None):
         self.finder = finder
         self.thresh = thresh
         self.octaves = octaves
         self.pattern_scale = pattern_scale
         self.brisk = cv2.BRISK_create(thresh=thresh, octaves=octaves, patternScale=pattern_scale)
-        
+
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
-        
+
         keypoints, descriptors = self.brisk.detectAndCompute(gray, mask)
         return keypoints, descriptors
     
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         keypoints = self.finder.detect(gray, mask)
@@ -439,7 +549,7 @@ class BRISKDescriptor(KeypointDescriptorMaker):
     
     def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint]) -> np.ndarray:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         _, descriptors = self.brisk.compute(gray, keypoints)
@@ -452,17 +562,81 @@ class BRISKDescriptor(KeypointDescriptorMaker):
             "octaves": self.octaves,
             "pattern_scale": self.pattern_scale
         }
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.BINARY
+
+
+class KAZEDescriptor(DescriptorComputer):
+    def __init__(self, extended: bool = False, upright: bool = False,
+                 threshold: float = 0.001, n_octaves: int = 4,
+                 n_octave_layers: int = 4, diffusivity: int = cv2.KAZE_DIFF_PM_G2,
+                 finder: KeypointFinder = None):
+        self.finder = finder
+        self.extended = extended
+        self.upright = upright
+        self.threshold = threshold
+        self.n_octaves = n_octaves
+        self.n_octave_layers = n_octave_layers
+        self.diffusivity = diffusivity
+        self.kaze = cv2.KAZE_create(
+            extended=extended,
+            upright=upright,
+            threshold=threshold,
+            nOctaves=n_octaves,
+            nOctaveLayers=n_octave_layers,
+            diffusivity=diffusivity
+        )
+
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+
+        keypoints, descriptors = self.kaze.detectAndCompute(gray, mask)
+        return keypoints, descriptors
     
+    def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+        keypoints = self.finder.detect(gray, mask)
+        return keypoints
     
-class AKAZEDescriptor(KeypointDescriptorMaker):
+    def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint]) -> tuple[list, np.ndarray]:
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+        else:
+            gray = (image * 255).astype(np.uint8)
+
+        descriptors = self.kaze.compute(gray, keypoints)
+        return descriptors
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": "KAZE",
+            "extended": self.extended,
+            "upright": self.upright,
+            "threshold": self.threshold,
+            "n_octaves": self.n_octaves,
+            "n_octave_layers": self.n_octave_layers,
+            "diffusivity": self.diffusivity
+        }
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
+class AKAZEDescriptor(DescriptorComputer):
     def __init__(self, descriptor_type: int = cv2.AKAZE_DESCRIPTOR_MLDB, 
-                descriptor_size: int = 0, 
-                descriptor_channels: int = 3, 
-                threshold: float = 0.001, 
-                n_octaves: int = 4, 
-                n_octave_layers: int = 4, 
-                diffusivity: int = cv2.KAZE_DIFF_PM_G2,
-                finder: KeypointFinder = None):
+                 descriptor_size: int = 0, 
+                 descriptor_channels: int = 3, 
+                 threshold: float = 0.001, 
+                 n_octaves: int = 4, 
+                 n_octave_layers: int = 4, 
+                 diffusivity: int = cv2.KAZE_DIFF_PM_G2,
+                 finder: KeypointFinder = None):
         
         self.descriptor_type = descriptor_type
         self.descriptor_size = descriptor_size
@@ -483,7 +657,7 @@ class AKAZEDescriptor(KeypointDescriptorMaker):
         
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -492,7 +666,7 @@ class AKAZEDescriptor(KeypointDescriptorMaker):
 
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         keypoints = self.finder.detect(gray, mask)
@@ -500,7 +674,7 @@ class AKAZEDescriptor(KeypointDescriptorMaker):
     
     def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint]) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         [setattr(kp, 'class_id', 0) for kp in keypoints] # in akaze compute func the class_id of the keypoints can't be -1(the default value). It needs to be changed to a different value than -1.
@@ -522,7 +696,10 @@ class AKAZEDescriptor(KeypointDescriptorMaker):
             "diffusivity": self.diffusivity
         }
 
-class SURFDescriptor(KeypointDescriptorMaker):
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.BINARY
+
+class SURFDescriptor(DescriptorComputer):
     """
     Note: SURF is part of the opencv-contrib-python package. 
     Ensure you have it installed for this class to work.
@@ -535,7 +712,7 @@ class SURFDescriptor(KeypointDescriptorMaker):
         self.n_octave_layers = n_octave_layers
         self.extended = extended
         self.upright = upright
-        self.surf = xfeatures2d.SURF_create(
+        self.surf = cv2.xfeatures2d.SURF_create(
             hessianThreshold=hessian_threshold,
             nOctaves=n_octaves,
             nOctaveLayers=n_octave_layers,
@@ -545,7 +722,7 @@ class SURFDescriptor(KeypointDescriptorMaker):
 
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
             
@@ -554,7 +731,7 @@ class SURFDescriptor(KeypointDescriptorMaker):
 
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         keypoints = self.finder.detect(gray, mask)
@@ -562,7 +739,7 @@ class SURFDescriptor(KeypointDescriptorMaker):
     
     def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint]) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -579,9 +756,11 @@ class SURFDescriptor(KeypointDescriptorMaker):
             "extended": self.extended,
             "upright": self.upright
         }
-        
 
-class PCASIFTDescriptor(KeypointDescriptorMaker):
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
+class PCASIFTDescriptor(DescriptorComputer):
     def __init__(self, 
                 num_components: int = 128, # A more common value than 128
                 n_features: int = 0, 
@@ -623,7 +802,7 @@ class PCASIFTDescriptor(KeypointDescriptorMaker):
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -661,7 +840,7 @@ class PCASIFTDescriptor(KeypointDescriptorMaker):
     
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         keypoints = self.finder.detect(gray, mask)
@@ -670,7 +849,7 @@ class PCASIFTDescriptor(KeypointDescriptorMaker):
     def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint]) -> tuple[list, np.ndarray]:
         
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -710,7 +889,7 @@ class PCASIFTDescriptor(KeypointDescriptorMaker):
     
     def to_dict(self) -> dict[str, Any]:
         return {
-            "type": "PCA-SIFT",
+            "type": "PCA-SIFT-Root (Flawed)",
             "n_features": self.n_features,
             "n_octave_layers": self.n_octave_layers,
             "contrast_threshold": self.contrast_threshold,
@@ -718,9 +897,12 @@ class PCASIFTDescriptor(KeypointDescriptorMaker):
             "sigma": self.sigma,
             "num_components": self.num_components
         }
-    
 
-class HOGDescriptor(KeypointDescriptorMaker):
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
+
+class HOGDescriptor(DescriptorComputer):
     """
     NOTE: HOG is a descriptor, not a keypoint detector. This class
     uses a SIFT detector to find keypoints, and then computes HOG
@@ -758,7 +940,7 @@ class HOGDescriptor(KeypointDescriptorMaker):
         at those keypoint locations.
         """
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -783,7 +965,7 @@ class HOGDescriptor(KeypointDescriptorMaker):
     
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -792,7 +974,7 @@ class HOGDescriptor(KeypointDescriptorMaker):
     
     def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint]) -> np.ndarray:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
             
@@ -819,10 +1001,7 @@ class HOGDescriptor(KeypointDescriptorMaker):
         n_cells_y = self.block_size[1]
         n_cells_x = self.block_size[0]
         
-        if descriptors_flat is not None:
-            # El reshape este ha salido de un post de StackOverflow, no de la docu oficial de opencv xddddd
-            # https://stackoverflow.com/questions/22373707/why-does-opencvs-hog-descriptor-return-so-many-values
-            
+        if descriptors_flat is not None:  
             descriptors = descriptors_flat.reshape(N,self.hog.getDescriptorSize()
             )
         return descriptors
@@ -847,7 +1026,10 @@ class HOGDescriptor(KeypointDescriptorMaker):
             # "sigma": self.sigma
         }
 
-class GLOHDescriptor(KeypointDescriptorMaker):
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
+class GLOHDescriptor(DescriptorComputer):
     """
     GLOH Descriptor based on Medium article:
     "Exploring Gradient Location and Orientation Histogram (GLOH) for Image Recognition and Object Detection"
@@ -866,7 +1048,6 @@ class GLOHDescriptor(KeypointDescriptorMaker):
                 finder: KeypointFinder = None):
 
         self.finder = finder
-
         # Store parameters
         self.nbins = nbins
         
@@ -876,11 +1057,11 @@ class GLOHDescriptor(KeypointDescriptorMaker):
         self.contrast_threshold = contrast_threshold
         self.edge_threshold = edge_threshold
         self.sigma = sigma
-        
+
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list[cv2.KeyPoint], np.ndarray]:
         # BASED ON: medium.com/@vincentchung_72457/exploring-gradient-location-orientation-histogram-gloh-for-image-recognition-and-object-detection-3e3c231a5b01
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -893,7 +1074,7 @@ class GLOHDescriptor(KeypointDescriptorMaker):
         _mag, angle = cv2.cartToPolar(grad_x, grad_y, angleInDegrees=True)
 
         # Compute keypoints using SIFT
-        keypoints = self.finder.detect(gray, mask)
+        keypoints = self.sift_detector.detect(gray, mask)
 
         if not keypoints:
             return [], np.array([])
@@ -945,7 +1126,7 @@ class GLOHDescriptor(KeypointDescriptorMaker):
     
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -955,7 +1136,7 @@ class GLOHDescriptor(KeypointDescriptorMaker):
     def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint]) -> np.ndarray:
         # BASED ON: medium.com/@vincentchung_72457/exploring-gradient-location-orientation-histogram-gloh-for-image-recognition-and-object-detection-3e3c231a5b01
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
         
@@ -1016,7 +1197,7 @@ class GLOHDescriptor(KeypointDescriptorMaker):
         return {
             "type": "GLOH",
             "nbins": self.nbins,
-            
+
             # SIFT detector params
             "detector_type": "SIFT",
             "n_features": self.n_features,
@@ -1025,6 +1206,9 @@ class GLOHDescriptor(KeypointDescriptorMaker):
             "edge_threshold": self.edge_threshold,
             "sigma": self.sigma
         }
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
 
 class DescriptorMatcher:
     
@@ -1048,7 +1232,6 @@ class DescriptorMatcher:
             self.matcher = cv2.FlannBasedMatcher(indexParams=index_params, searchParams=search_params)
             
     def match(self, descriptors1: np.ndarray, descriptors2: np.ndarray) -> list:
-        
         if descriptors1 is None or descriptors2 is None or len(descriptors1) == 0 or len(descriptors2) == 0:
             return []
         matches = self.matcher.knnMatch(descriptors1, descriptors2, k=2)
@@ -1061,20 +1244,178 @@ class DescriptorMatcher:
                 good_matches.append(m)
         return good_matches
     
+    def match_keypoints_descriptors(
+        self,
+        keypoints1: list,
+        descriptors1: np.ndarray,
+        keypoints2: list,
+        descriptors2: np.ndarray
+    ) -> tuple[list, np.ndarray, list, np.ndarray]:
+        if descriptors1 is None or descriptors2 is None or len(descriptors1) == 0 or len(descriptors2) == 0:
+            return [], np.array([]), [], np.array([])
+
+        matches = self.matcher.knnMatch(descriptors1, descriptors2, k=2)
+        good_kp1, good_desc1, good_kp2, good_desc2 = [], [], [], []
+
+        for m_n in matches:
+            if len(m_n) != 2:
+                continue
+            m, n = m_n
+            if m.distance < self.ratio_test_threshold * n.distance:
+                good_kp1.append(keypoints1[m.queryIdx])
+                good_kp2.append(keypoints2[m.trainIdx])
+                good_desc1.append(descriptors1[m.queryIdx])
+                good_desc2.append(descriptors2[m.trainIdx])
+
+        return good_kp1, np.array(good_desc1), good_kp2, np.array(good_desc2)
+
+    
     def discard_painting(self, num_matches: int, threshold: int = 10) -> bool:
         #return True if the number of matches is less than the threshold
         return num_matches < threshold
     
     def to_dict(self) -> dict[str, Any]:
+        # Convert norm_type to human-readable string
+        if self.norm_type == cv2.NORM_L2:
+            norm_type_str = "L2"
+        elif self.norm_type == cv2.NORM_HAMMING:
+            norm_type_str = "HAMMING"
+        elif self.norm_type == cv2.NORM_L1:
+            norm_type_str = "L1"
+        else:
+            norm_type_str = str(self.norm_type)
+
         return {
             "matcher_type": self.matcher_type,
-            "norm_type": self.norm_type,
+            "norm_type": norm_type_str,
             "cross_check": self.cross_check,
             "ratio_test_threshold": self.ratio_test_threshold
         }
-            
-        
-        
+
+
+class Scorer(abc.ABC):
+    def __init__(self, matcher: DescriptorMatcher):
+        super().__init__()
+        self.matcher = matcher
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors, database_image: np.ndarray, database_keypoints, database_descriptors) -> tuple[bool, float, dict]:
+        pass
+
+    def to_dict(self) -> dict:
+        return {
+            'class': self.__class__.__name__,
+            'matcher': self.matcher.to_dict(),
+        }
+
+# FIXME: this score can be improved a lot, like #inliers / sqrt(#keypoints_q * #keypoints_db) which is more symetrical
+class HomographyScorer(Scorer):
+    def __init__(self, matcher: DescriptorMatcher,
+                 ransac_thresh: float = 5.0,
+                 max_reproj_error: float = 5.0,
+                 use_reproj_error_penalty: bool = True,
+                 min_points: int = 20):
+
+        super().__init__(matcher)
+        self.ransac_thresh = ransac_thresh
+        self.max_reproj_error = max_reproj_error
+        self.use_reproj_error_penalty = use_reproj_error_penalty
+        self.min_points = min_points
+
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors, database_image: np.ndarray, database_keypoints, database_descriptors):
+
+        src_kpts, src_desc, dst_kpts, dst_desc = self.matcher.match_keypoints_descriptors(query_keypoints, query_descriptors, database_keypoints, database_descriptors)
+
+        # check if the homography can be computed in a stable manner, with less than min_points it may find homographies that can be "whatever"
+        if len(src_kpts) < self.min_points:
+            return False, 0.0, {"reason": "not_enough_points"}
+
+        src_pts = np.float32([kpt.pt for kpt in src_kpts])
+        dst_pts = np.float32([kpt.pt for kpt in dst_kpts])
+
+        M, mask = cv2.findHomography(src_pts, dst_pts, method=cv2.RANSAC, ransacReprojThreshold=self.ransac_thresh)
+
+        if M is None or mask is None:
+            return False, 0.0, {"reason": "homography_failed"}
+
+        inliers = mask.ravel().astype(bool)
+        n_inliers = np.sum(inliers)
+        inlier_ratio = n_inliers / len(src_pts)
+
+        src_inliers = src_pts[inliers]
+        dst_inliers = dst_pts[inliers]
+
+        if len(src_inliers) == 0:
+            return False, 0.0, {"reason": "no_inliers"}
+
+        src_proj = cv2.perspectiveTransform(src_inliers.reshape(-1, 1, 2), M).reshape(-1, 2)
+        reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
+
+        det = np.linalg.det(M[:2, :2])
+        if det <= 0.4 or det > 10:  # Negative det is a flip, det too large/small is bad
+            valid = False
+        elif reproj_error > self.max_reproj_error:
+            valid = False
+        else:
+            valid = True
+
+        # Calculate score based on configuration
+        if self.use_reproj_error_penalty:
+            score = inlier_ratio * np.exp(-0.5 * (reproj_error / self.max_reproj_error))
+        else:
+            score = inlier_ratio
+
+        info = {
+            "n_inliers": int(n_inliers),
+            "total_matches": int(len(src_pts)),
+            "inlier_ratio": float(inlier_ratio),
+            "reproj_error": float(reproj_error),
+            "det": float(det),
+            "use_reproj_error_penalty": self.use_reproj_error_penalty
+        }
+
+        return valid, float(score), info
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d['ransac_thresh'] = self.ransac_thresh
+        d['max_reproj_error'] = self.max_reproj_error
+        d['use_reproj_error_penalty'] = self.use_reproj_error_penalty
+        d['min_points'] = self.min_points
+        return d
+
+
+class KeypointAndDescriptorMaker:
+    def __init__(self, *, descriptor_computer: DescriptorComputer, color_conversion: ColorConversion, preprocess: ImagePreprocessStep | None = None):
+
+        self.descriptor_computer = descriptor_computer
+        self.color_conversion = color_conversion
+        self.preprocess = preprocess
+
+
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
+        if mask is None:
+            mask = np.ones(image.shape[:2], dtype=np.uint8) * 255
+
+        # image = image.astype(np.float32) / 255
+
+        if self.preprocess is not None:
+            preprocessed_image, preprocessed_mask = self.preprocess(image, mask)
+        else:
+            preprocessed_image, preprocessed_mask = image, mask
+
+        colorspace_image, preprocessed_mask = self.color_conversion(preprocessed_image, preprocessed_mask)
+        keypoints, descriptors = self.descriptor_computer.detect_and_compute(colorspace_image)
+        # for part in descriptor_parts:
+            # assert isclose(part.sum(), 1.0), f"The sum was {part.sum()}"
+        return keypoints, descriptors
+    
+    def to_dict(self) -> dict:
+        return {
+            'descriptor_computer': self.descriptor_computer.to_dict(),
+            'color_conversion': self.color_conversion.to_dict(),
+            'preprocess': self.preprocess.to_dict(),
+        }
+
+
 if __name__ == "__main__":
     from pathlib import Path
     import traceback
@@ -1086,7 +1427,7 @@ if __name__ == "__main__":
     img_path = Path.home() / "MCV" / "C1" / "proyect" / "Team4" / "qsd1_w4" / "00002.jpg"
     if img_path.exists():
         img_bgr = cv2.imread(str(img_path))
-        img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        img = cv2.cvtColor(img_bgr, cv2.COLOR_RGB2BGR).astype(np.float32) / 255.0
         print(f"Loaded image {img_path} with shape {img.shape}")
     else:
         print(f"Image {img_path} not found — using generated dummy image.")
