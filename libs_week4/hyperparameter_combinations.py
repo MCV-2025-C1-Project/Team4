@@ -19,30 +19,23 @@ import libs_week3.preprocessing as preprocessing
 
 
 def generate_orb_configs() -> Iterator[Dict[str, Any]]:
-    # ORIGINAL FULL GRID (135 configs):
-    # param_grid = {
-    #     'n_features': [500, 1000, 2000, 3000, 5000],
-    #     'scale_factor': [1.1, 1.2, 1.5],
-    #     'n_levels': [8, 10, 12],
-    #     'wta_k': [2, 3, 4],
-    #     'score_type': [cv2.ORB_HARRIS_SCORE],
-    #     'patch_size': [31]
-    # }
-
-    # REDUCED GRID (12 configs): Focus on best performer (ORB mAP@k1 > 0.7)
-    # Key insights: ORB is crushing it, so focus on variations that matter
-    # - n_features: 2000, 3000 (sweet spot for quality)
-    # - scale_factor: 1.2 (standard), 1.5 (faster pyramids)
-    # - n_levels: 10 (good compromise)
-    # - wta_k: 2 (default, best tested), 3 (better discrimination)
+    # OPTIMIZED GRID (9 configs): Based on ranking results - ORB is the clear winner!
+    # mAP@k1 = 0.74-0.77 (best overall), fast descriptor computation (8-12s)
+    #
+    # Key findings from experiments:
+    # - n_features: 2000-3000 are optimal (top 10 results)
+    # - scale_factor: Both 1.2 and 1.5 work well
+    # - wta_k=2 DOMINATES: wta_k=3 has 15-20% worse performance + 10x slower queries
+    # - Add n_features=2500 to explore the sweet spot between 2000 and 3000
     param_grid = {
-        'n_features': [2000, 3000],
+        'n_features': [2000, 2500, 3000],
         'scale_factor': [1.2, 1.5],
         'n_levels': [10],
-        'wta_k': [2, 3],
+        'wta_k': [2],  # Removed wta_k=3: much worse performance and query time
         'score_type': [cv2.ORB_HARRIS_SCORE],
         'patch_size': [31]
     }
+    # Total: 3 × 2 × 1 = 6 configs
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
         yield dict(zip(keys, v))
@@ -62,51 +55,38 @@ def generate_surf_configs() -> Iterator[Dict[str, Any]]:
 
 
 def generate_sift_configs() -> Iterator[Dict[str, Any]]:
-    # ORIGINAL FULL GRID (24 configs):
-    # param_grid = {
-    #     'n_features': [500, 1000, 2000, 0],
-    #     'n_octave_layers': [3, 4],
-    #     'contrast_threshold': [0.03, 0.04, 0.06],
-    #     'sigma': [1.6, 2.0],
-    #     'edge_threshold': [15]
-    # }
-
-    # REDUCED GRID (12 configs): SIFT mAP@k1 = 0.5-0.6 (decent baseline)
-    # Key insights: Classic descriptor, focus on quality vs quantity trade-off
-    # - n_features: 1000, 2000, 0 (unlimited - let it find what it needs)
-    # - contrast_threshold: 0.03 (more keypoints), 0.04 (standard)
-    # - sigma: 1.6 (standard), 2.0 (smoother)
+    # DEPRECATED: Regular SIFT consistently underperforms RootSIFT (0.59-0.64 vs 0.69-0.77)
+    # RootSIFT has same computational cost but better normalization
+    # Keeping this function for reference but it's not used in the grid search
     param_grid = {
-        'n_features': [1000, 2000],
+        'n_features': [1000],
         'n_octave_layers': [4],
-        'contrast_threshold': [0.03, 0.04],
-        'sigma': [1.6, 2.0],
+        'contrast_threshold': [0.03],
+        'sigma': [1.6],
         'edge_threshold': [15]
     }
+    # Total: 1 config (not used)
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
         yield dict(zip(keys, v))
 
 def generate_rootsift_configs() -> Iterator[Dict[str, Any]]:
-    # ORIGINAL FULL GRID (24 configs):
-    # param_grid = {
-    #     'n_features': [500, 1000, 2000, 0],
-    #     'n_octave_layers': [4],
-    #     'contrast_threshold': [0.03, 0.04, 0.06],
-    #     'sigma': [1.6, 2.0],
-    #     'edge_threshold': [15]
-    # }
-
-    # REDUCED GRID (12 configs): RootSIFT should outperform SIFT
-    # Key insights: Improved normalization should give better results than SIFT
-    # Use same grid as SIFT for fair comparison
+    # OPTIMIZED GRID (18 configs): Strong second place after ORB
+    # mAP@k1 = 0.69-0.77 (competitive with ORB), computation time ~100-190s
+    #
+    # Key findings from experiments:
+    # - n_features: 1000 performs as well as 2000, add 1500 to explore
+    # - contrast_threshold: Both 0.03 and 0.04 work well (0.03 slightly better)
+    # - sigma: Both 1.6 and 2.0 are good
+    # - Best configs have ratio=0.7 and ransac=3.0 (tight matching)
     param_grid = {
-        'n_features': [1000, 2000],
+        'n_features': [1000, 1500, 2000],
         'n_octave_layers': [4],
         'contrast_threshold': [0.03, 0.04],
         'sigma': [1.6, 2.0],
         'edge_threshold': [15]
     }
+    # Total: 3 × 2 × 2 = 12 configs
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
         yield dict(zip(keys, v))
@@ -221,14 +201,21 @@ def generate_gloh_configs() -> Iterator[Dict[str, Any]]:
         yield dict(zip(keys, v))
         
 def generate_pcasift_configs() -> Iterator[Dict[str, Any]]:
+    # EXPLORATORY GRID (6 configs): Now properly implemented with database-wide PCA fitting
+    # Previous results were invalid (fit PCA per-image instead of per-database)
+    #
+    # Testing reduced dimensionality to see if it helps:
+    # - num_components: Focus on smaller dimensions (24, 36) for speed
+    # - Use RootSIFT's best parameters as base
     param_grid = {
-        'num_components': [24, 36, 48],
-        'n_features': [500, 1000, 1500, 2000], # SIFT param
+        'num_components': [24, 36],
+        'n_features': [1000, 1500],
         'n_octave_layers': [4],
-        'contrast_threshold': [0.03, 0.04],
-        'sigma': [1.6, 2.0],
+        'contrast_threshold': [0.03],  # Best from RootSIFT
+        'sigma': [1.6],  # Standard value
         'edge_threshold': [15]
     }
+    # Total: 2 × 2 = 4 configs
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
         yield dict(zip(keys, v))
@@ -238,41 +225,58 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     """
     Generates instances of different keypoint descriptors by iterating
     through all their specified hyperparameter configurations.
+
+    OPTIMIZED BASED ON RANKING RESULTS:
+    - ORB: 6 configs (mAP@k1=0.74-0.77, WINNER!)
+    - RootSIFT: 12 configs (mAP@k1=0.69-0.77, strong second)
+    - PCA-SIFT: 4 configs (exploratory with proper fitting)
+    Total: 22 descriptor configs (down from 104)
     """
-    for config in generate_sift_configs(): # good
-        yield SIFTDescriptor(**config) # good
+    # ORB: Best performer - fast and accurate
+    for config in generate_orb_configs():
+        yield ORBDescriptor(**config)
 
-    for config in generate_orb_configs(): # good
-        yield ORBDescriptor(**config) # good
+    # RootSIFT: Strong alternative to ORB
+    for config in generate_rootsift_configs():
+        yield RootSIFTDescriptor(**config)
 
-    for config in generate_rootsift_configs(): # improved version of SIFT
-        yield RootSIFTDescriptor(**config) # improved version of SIFT
+    # PCA-SIFT: Exploratory - now with proper database-wide PCA fitting
+    for config in generate_pcasift_configs():
+        yield PCASIFTDescriptor(**config)
 
-    # for config in generate_surf_configs(): # not available by default in opencv
-        # yield SURFDescriptor(**config) # not available by default in opencv
+    # === DISCARDED DESCRIPTORS (from ranking analysis) ===
 
-    # for config in generate_brisk_configs(): # bad too many keypoints
-        # yield BRISKDescriptor(**config) # bad too many keypoints
+    # SIFT: Consistently worse than RootSIFT (0.59-0.64 vs 0.69-0.77)
+    # for config in generate_sift_configs():
+    #     yield SIFTDescriptor(**config)
 
-    # for config in generate_kaze_configs(): # float version of AKAZE, might be better
-        # yield KAZEDescriptor(**config) # float version of AKAZE, might be better
+    # KAZE: Too slow (455-544s) + poor performance (0.46-0.54) + too many keypoints (5k-24k)
+    # for config in generate_kaze_configs():
+    #     yield KAZEDescriptor(**config)
 
-    # one akaza config fails (no keypoints detected maybe)
-    # for config in generate_akaze_configs(): # bad performs pretty bad
-        # yield AKAZEDescriptor(**config) # bad performs pretty bad
-        
-    # for config in generate_daisy_configs(): # bad too many keypoints
-        # yield DaisyDescriptor(**config) # bad too many keypoints
-    
-    # for config in generate_hog_configs(): # bad performs like shit
-        # yield HOGDescriptor(**config) # bad performs like shit
+    # SURF: Not available by default in opencv
+    # for config in generate_surf_configs():
+    #     yield SURFDescriptor(**config)
 
-    # for config in generate_gloh_configs(): # bad pefrorms like shit
-        # yield GLOHDescriptor(**config) # bad pefrorms like shit
-    
-    # FIXME: the PCA should be run only once for the whole database end then we have to transform all images when computing the descriptor
-    for config in generate_pcasift_configs(): # bad performs pretty bad
-        yield PCASIFTDescriptor(**config) # bad performs pretty bad
+    # BRISK: Too many keypoints, slow
+    # for config in generate_brisk_configs():
+    #     yield BRISKDescriptor(**config)
+
+    # AKAZE: Poor performance (mAP@k1 ~0.45), some configs fail
+    # for config in generate_akaze_configs():
+    #     yield AKAZEDescriptor(**config)
+
+    # DAISY: Too many keypoints (24k at step=16), very slow
+    # for config in generate_daisy_configs():
+    #     yield DaisyDescriptor(**config)
+
+    # HOG: Very poor performance
+    # for config in generate_hog_configs():
+    #     yield HOGDescriptor(**config)
+
+    # GLOH: Very poor performance
+    # for config in generate_gloh_configs():
+    #     yield GLOHDescriptor(**config)
 
 
 def generate_color_space_combinations() -> list[list[ColorSpace]]:
@@ -306,29 +310,18 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker) -> Iterator
     """
     Generator for scorer configurations for a given descriptor maker.
 
+    OPTIMIZED BASED ON RANKING RESULTS:
+    - ratio_threshold=0.7 appears in 8 of top 10 results (DOMINANT)
+    - ransac_thresh=3.0 is the clear winner for tight matching
+    - use_reproj_error_penalty=False simplifies scoring without losing accuracy
+    - min_points=20 is standard, test 15 and 25 as well
+
     Args:
         descriptor_maker: The KeypointAndDescriptorMaker to generate scorers for
 
     Yields:
         Dictionary containing 'matcher' and 'scorer' keys
     """
-    # ORIGINAL FULL GRID (162 configs):
-    # - ratio_threshold: [0.7, 0.75, 0.8]
-    # - cross_check: [False]
-    # - ransac_thresh: [3.0, 5.0, 8.0]
-    # - max_reproj_error: [3.0, 5.0, 8.0]
-    # - use_reproj_error_penalty: [True, False]
-    # - min_points: [15, 20, 30]
-    # Total: 3 × 1 × 54 = 162
-
-    # REDUCED GRID (4 configs): Minimal set for initial descriptor testing
-    # After finding best descriptors, we can expand scorer grid
-    # Key combinations:
-    #   1. Standard tight config (ratio=0.75, ransac=5.0, reproj=5.0, penalty=True, min_pts=20)
-    #   2. Lenient config (ratio=0.8, ransac=8.0, reproj=8.0, penalty=True, min_pts=15)
-    #   3. Tight without penalty (ratio=0.7, ransac=3.0, reproj=3.0, penalty=False, min_pts=20)
-    #   4. Balanced config (ratio=0.75, ransac=5.0, reproj=5.0, penalty=False, min_pts=20)
-
     # Determine the appropriate norm type based on descriptor value type
     descriptor_value_type = descriptor_maker.descriptor_computer.get_value_type()
 
@@ -337,25 +330,10 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker) -> Iterator
     else:  # BINARY
         norm_type = cv2.NORM_HAMMING
 
-    # Define the 4 configurations explicitly
+    # OPTIMIZED GRID (5 configs): Focus on what works
+    # Based on ranking: ratio=0.7 + ransac=3.0 + no_penalty is the winning formula
     scorer_configs = [
-        # Config 1: Standard tight - good baseline
-        {
-            'ratio_threshold': 0.75,
-            'ransac_thresh': 5.0,
-            'max_reproj_error': 5.0,
-            'use_reproj_error_penalty': True,
-            'min_points': 20
-        },
-        # Config 2: Lenient - more matches, less strict
-        {
-            'ratio_threshold': 0.8,
-            'ransac_thresh': 8.0,
-            'max_reproj_error': 8.0,
-            'use_reproj_error_penalty': True,
-            'min_points': 15
-        },
-        # Config 3: Tight without penalty - pure inlier ratio
+        # Config 1: THE WINNER - appears in top results consistently
         {
             'ratio_threshold': 0.7,
             'ransac_thresh': 3.0,
@@ -363,15 +341,45 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker) -> Iterator
             'use_reproj_error_penalty': False,
             'min_points': 20
         },
-        # Config 4: Balanced without penalty - middle ground
+        # Config 2: Even tighter ratio - explore if we can do better
         {
-            'ratio_threshold': 0.75,
-            'ransac_thresh': 5.0,
-            'max_reproj_error': 5.0,
+            'ratio_threshold': 0.65,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
             'use_reproj_error_penalty': False,
             'min_points': 20
-        }
+        },
+        # Config 3: Slightly looser ratio - safety net
+        {
+            'ratio_threshold': 0.75,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': False,
+            'min_points': 20
+        },
+        # Config 4: Different min_points (fewer for challenging cases)
+        {
+            'ratio_threshold': 0.7,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': False,
+            'min_points': 15
+        },
+        # Config 5: Different min_points (more for stricter matching)
+        {
+            'ratio_threshold': 0.7,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': False,
+            'min_points': 25
+        },
     ]
+
+    # === DISCARDED SCORER CONFIGS (from ranking analysis) ===
+    # - ratio=0.8: Consistently worse than 0.7
+    # - ransac=5.0, 8.0: Too loose, worse precision
+    # - use_reproj_error_penalty=True: Adds complexity without benefit
+    # - Lenient configs in general perform poorly
 
     for config in scorer_configs:
         ratio_threshold = config['ratio_threshold']
