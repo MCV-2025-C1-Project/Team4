@@ -955,12 +955,14 @@ class HomographyScorer(Scorer):
                  ransac_thresh: float = 5.0,
                  max_reproj_error: float = 5.0,
                  use_reproj_error_penalty: bool = True,
+                 reproj_error_penalty_weight: float = 0.5,
                  min_points: int = 20):
 
         super().__init__(matcher)
         self.ransac_thresh = ransac_thresh
         self.max_reproj_error = max_reproj_error
         self.use_reproj_error_penalty = use_reproj_error_penalty
+        self.reproj_error_penalty_weight = reproj_error_penalty_weight
         self.min_points = min_points
 
     def score(self, query_image: np.ndarray, query_keypoints, query_descriptors, database_image: np.ndarray, database_keypoints, database_descriptors):
@@ -1002,7 +1004,10 @@ class HomographyScorer(Scorer):
 
         # Calculate score based on configuration
         if self.use_reproj_error_penalty:
-            score = inlier_ratio * np.exp(-0.5 * (reproj_error / self.max_reproj_error))
+            # Use tunable penalty weight instead of fixed 0.5
+            # Lower weight (e.g., 0.1) = gentler penalty, better for scale differences
+            # Higher weight (e.g., 0.5) = stronger penalty, stricter matching
+            score = inlier_ratio * np.exp(-self.reproj_error_penalty_weight * (reproj_error / self.max_reproj_error))
         else:
             score = inlier_ratio
 
@@ -1012,7 +1017,8 @@ class HomographyScorer(Scorer):
             "inlier_ratio": float(inlier_ratio),
             "reproj_error": float(reproj_error),
             "det": float(det),
-            "use_reproj_error_penalty": self.use_reproj_error_penalty
+            "use_reproj_error_penalty": self.use_reproj_error_penalty,
+            "reproj_error_penalty_weight": self.reproj_error_penalty_weight if self.use_reproj_error_penalty else None
         }
 
         return valid, float(score), info
@@ -1022,6 +1028,7 @@ class HomographyScorer(Scorer):
         d['ransac_thresh'] = self.ransac_thresh
         d['max_reproj_error'] = self.max_reproj_error
         d['use_reproj_error_penalty'] = self.use_reproj_error_penalty
+        d['reproj_error_penalty_weight'] = self.reproj_error_penalty_weight
         d['min_points'] = self.min_points
         return d
 
