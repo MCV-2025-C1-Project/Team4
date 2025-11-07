@@ -276,7 +276,7 @@ def generate_color_space_combinations() -> list[list[ColorSpace]]:
 def generate_preprocess_strategies() -> list[preprocessing.ImagePreprocessStep | None]:
     return [
         preprocessing.Preprocess([
-            preprocessing.CropToMask(),
+            # preprocessing.CropToMask(),
         ])
     ]
 

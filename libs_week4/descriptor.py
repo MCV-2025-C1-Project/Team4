@@ -853,9 +853,19 @@ class DescriptorMatcher:
         return num_matches < threshold
     
     def to_dict(self) -> dict[str, Any]:
+        # Convert norm_type to human-readable string
+        if self.norm_type == cv2.NORM_L2:
+            norm_type_str = "L2"
+        elif self.norm_type == cv2.NORM_HAMMING:
+            norm_type_str = "HAMMING"
+        elif self.norm_type == cv2.NORM_L1:
+            norm_type_str = "L1"
+        else:
+            norm_type_str = str(self.norm_type)
+
         return {
             "matcher_type": self.matcher_type,
-            "norm_type": self.norm_type,
+            "norm_type": norm_type_str,
             "cross_check": self.cross_check,
             "ratio_test_threshold": self.ratio_test_threshold
         }
