@@ -143,9 +143,20 @@ def main():
             matcher = scorer_config['matcher']
             scorer = scorer_config['scorer']
 
-            print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] --- Scorer {scorer_idx}: "
-                  f"ratio={matcher.ratio_test_threshold:.2f}, "
-                  f"ransac={scorer.ransac_thresh:.1f}, min_pts={scorer.min_points} ---", flush=True)
+            # Use to_dict() for generic scorer info (works for all scorer types)
+            scorer_dict = scorer.to_dict()
+            scorer_class = scorer_dict.get('class', 'Unknown')
+
+            # Build a concise description based on scorer type
+            if hasattr(scorer, 'ransac_thresh') and hasattr(scorer, 'min_points'):
+                # HomographyScorer, HomographyDistanceScorer, or MultiFactorScorer
+                scorer_desc = f"ransac={scorer.ransac_thresh:.1f}, min_pts={scorer.min_points}"
+            else:
+                # MatchRatioScorer or SymmetricMatchRatioScorer
+                scorer_desc = f"min_matches={scorer_dict.get('min_matches', 'N/A')}"
+
+            print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] --- Scorer {scorer_idx} ({scorer_class}): "
+                  f"ratio={matcher.ratio_test_threshold:.2f}, {scorer_desc} ---", flush=True)
 
             # Query and evaluate WITHOUT recomputing descriptors
             start_time_query = time.time()
