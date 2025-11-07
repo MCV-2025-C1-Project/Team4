@@ -100,16 +100,26 @@ def main():
             continue
 
         print(f"\n{'='*60}")
-        print(f"DESCRIPTOR MAKER {desc_idx}: {descriptor_maker.descriptor_computer.to_dict()['type']}")
+        print(f"DESCRIPTOR MAKER {desc_idx}")
         print(f"{'='*60}")
 
+        # Pretty print the descriptor maker configuration
+        descriptor_dict = descriptor_maker.to_dict()
+        print("\nDescriptor Configuration:")
+        print(json.dumps(descriptor_dict, indent=2))
+
         # COMPUTE DESCRIPTORS ONCE for this descriptor maker
-        print("Computing descriptors for entire database...")
+        print("\nComputing descriptors for entire database...")
         start_time_descriptors = time.time()
         database.reset_descriptors_distances_and_scores()
         database.compute_keypoints_and_descriptors(descriptor_maker)
         descriptor_time = time.time() - start_time_descriptors
-        print(f"  Descriptor computation time: {descriptor_time:.2f}s")
+        print(f"Descriptor computation time: {descriptor_time:.2f}s")
+
+        # Compute and print statistics
+        stats = database.compute_keypoint_descriptor_statistics()
+        print("\nKeypoint & Descriptor Statistics:")
+        print(json.dumps(stats, indent=2))
 
         # Store results for all scorer configurations
         all_results = []
@@ -179,6 +189,7 @@ def main():
                     'query_time': query_time
                 },
                 'indices': {'desc_idx': desc_idx, 'scorer_idx': scorer_idx},
+                'statistics': stats,
                 'predictions': {
                     'ground_truth': ground_truth,
                     'reconciled_results': reconciled_results

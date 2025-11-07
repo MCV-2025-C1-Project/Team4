@@ -77,7 +77,7 @@ def generate_sift_configs() -> Iterator[Dict[str, Any]]:
     # - contrast_threshold: 0.03 (more keypoints), 0.04 (standard)
     # - sigma: 1.6 (standard), 2.0 (smoother)
     param_grid = {
-        'n_features': [1000, 2000, 0],
+        'n_features': [1000, 2000],
         'n_octave_layers': [4],
         'contrast_threshold': [0.03, 0.04],
         'sigma': [1.6, 2.0],
@@ -101,7 +101,7 @@ def generate_rootsift_configs() -> Iterator[Dict[str, Any]]:
     # Key insights: Improved normalization should give better results than SIFT
     # Use same grid as SIFT for fair comparison
     param_grid = {
-        'n_features': [1000, 2000, 0],
+        'n_features': [1000, 2000],
         'n_octave_layers': [4],
         'contrast_threshold': [0.03, 0.04],
         'sigma': [1.6, 2.0],
@@ -246,18 +246,18 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     # for config in generate_surf_configs(): # not available by default in opencv
         # yield SURFDescriptor(**config) # not available by default in opencv
 
-    for config in generate_brisk_configs(): # bad too many keypoints
-        yield BRISKDescriptor(**config) # bad too many keypoints
+    # for config in generate_brisk_configs(): # bad too many keypoints
+        # yield BRISKDescriptor(**config) # bad too many keypoints
 
     for config in generate_kaze_configs(): # float version of AKAZE, might be better
         yield KAZEDescriptor(**config) # float version of AKAZE, might be better
 
     # one akaza config fails (no keypoints detected maybe)
-    for config in generate_akaze_configs(): # bad performs pretty bad
-        yield AKAZEDescriptor(**config) # bad performs pretty bad
+    # for config in generate_akaze_configs(): # bad performs pretty bad
+        # yield AKAZEDescriptor(**config) # bad performs pretty bad
         
-    for config in generate_daisy_configs(): # bad too many keypoints
-        yield DaisyDescriptor(**config) # bad too many keypoints
+    # for config in generate_daisy_configs(): # bad too many keypoints
+        # yield DaisyDescriptor(**config) # bad too many keypoints
     
     # for config in generate_hog_configs(): # bad performs like shit
         # yield HOGDescriptor(**config) # bad performs like shit

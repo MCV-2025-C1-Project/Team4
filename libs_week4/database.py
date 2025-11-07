@@ -36,6 +36,55 @@ class ImageDatabase:
         for image in tqdm.tqdm(self.images):
             image.keypoints, image.descriptors = descriptor_maker.detect_and_compute(image.image, image.mask)
 
+    def compute_keypoint_descriptor_statistics(self) -> dict:
+        """
+        Compute statistics about keypoints and descriptors across all images in the database.
+
+        Returns:
+            dict: Statistics including count, mean, std, min, max for keypoints,
+                  and descriptor dimensions.
+        """
+        keypoint_counts = []
+        descriptor_sizes = []
+        descriptor_dims = set()
+
+        for image in self.images:
+            if image.keypoints is not None:
+                keypoint_counts.append(len(image.keypoints))
+
+            if image.descriptors is not None and len(image.descriptors) > 0:
+                descriptor_sizes.append(len(image.descriptors))
+                descriptor_dims.add(image.descriptors.shape[1] if len(image.descriptors.shape) > 1 else 1)
+
+        if not keypoint_counts:
+            return {
+                "error": "No keypoints computed yet"
+            }
+
+        stats = {
+            "keypoints": {
+                "count": len(keypoint_counts),
+                "mean": float(np.mean(keypoint_counts)),
+                "std": float(np.std(keypoint_counts)),
+                "min": int(np.min(keypoint_counts)),
+                "max": int(np.max(keypoint_counts)),
+                "median": float(np.median(keypoint_counts)),
+                "total": int(np.sum(keypoint_counts))
+            },
+            "descriptors": {
+                "count": len(descriptor_sizes),
+                "mean": float(np.mean(descriptor_sizes)) if descriptor_sizes else 0,
+                "std": float(np.std(descriptor_sizes)) if descriptor_sizes else 0,
+                "min": int(np.min(descriptor_sizes)) if descriptor_sizes else 0,
+                "max": int(np.max(descriptor_sizes)) if descriptor_sizes else 0,
+                "median": float(np.median(descriptor_sizes)) if descriptor_sizes else 0,
+                "total": int(np.sum(descriptor_sizes)) if descriptor_sizes else 0,
+                "dimensions": list(descriptor_dims) if descriptor_dims else []
+            }
+        }
+
+        return stats
+
     def query(self, query_image: np.ndarray, query_keypoints, query_descriptors, scorer: Scorer, k) -> list[Image]:
         for image in self.images:
             image.valid, image.score, image.info = scorer.score(
