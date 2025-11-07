@@ -92,10 +92,12 @@ def main():
     print("Loading queries...")
     queries, ground_truth = load_queries(args.queries_path)
 
-    iteration = 0
-
     # OUTER LOOP: Iterate over descriptor makers
     for desc_idx, descriptor_maker in enumerate(descriptor_maker_grid_search()):
+
+        # Check if we should skip this descriptor based on command line args
+        if desc_idx < args.from_iter or (desc_idx - args.from_iter) % args.every != 0:
+            continue
 
         print(f"\n{'='*60}")
         print(f"DESCRIPTOR MAKER {desc_idx}: {descriptor_maker.descriptor_computer.to_dict()['type']}")
@@ -103,26 +105,27 @@ def main():
 
         # COMPUTE DESCRIPTORS ONCE for this descriptor maker
         print("Computing descriptors for entire database...")
+        start_time_descriptors = time.time()
         database.reset_descriptors_distances_and_scores()
         database.compute_keypoints_and_descriptors(descriptor_maker)
+        descriptor_time = time.time() - start_time_descriptors
+        print(f"  Descriptor computation time: {descriptor_time:.2f}s")
+
+        # Store results for all scorer configurations
+        all_results = []
 
         # INNER LOOP: Iterate over scorer configurations
         for scorer_idx, scorer_config in enumerate(scorer_grid_search(descriptor_maker)):
 
-            # Check if we should skip this iteration based on command line args
-            if iteration < args.from_iter or (iteration - args.from_iter) % args.every != 0:
-                iteration += 1
-                continue
-
             matcher = scorer_config['matcher']
             scorer = scorer_config['scorer']
 
-            print(f"\n--- Iteration {iteration:05d} (Desc {desc_idx}, Scorer {scorer_idx}): "
+            print(f"\n--- Scorer {scorer_idx}: "
                   f"ratio={matcher.ratio_test_threshold:.2f}, "
                   f"ransac={scorer.ransac_thresh:.1f}, min_pts={scorer.min_points} ---")
 
             # Query and evaluate WITHOUT recomputing descriptors
-            start_time_total = time.time()
+            start_time_query = time.time()
 
             results_top_5 = []
             for query in queries:
@@ -137,8 +140,8 @@ def main():
                     query_image_results.append(top_5_ids)
                 results_top_5.append(query_image_results)
 
-            total_time = time.time() - start_time_total
-            print(f"  Query processing time: {total_time:.2f}s")
+            query_time = time.time() - start_time_query
+            print(f"  Query processing time: {query_time:.2f}s")
 
             # Reconciliation block to handle detection mismatches robustly
             reconciled_results = []
@@ -163,26 +166,33 @@ def main():
 
             print(f"  --> Results: map@k1={map1:.4f}, map@k5={map5:.4f}")
 
-            # Save results
-            results_data = {
+            # Append results with BOTH descriptor maker and scorer parameters
+            all_results.append({
                 'params': {
                     'keypoint_and_descriptor_maker': descriptor_maker.to_dict(),
                     'matcher': matcher.to_dict(),
                     'scorer': scorer.to_dict()
                 },
                 'metrics': {'map@k1': map1, 'map@k5': map5},
-                'timing': {'query_time': total_time},
-                'indices': {'desc_idx': desc_idx, 'scorer_idx': scorer_idx, 'iteration': iteration}
-            }
-            save_results_for_config(args.results_folder, iteration, results_data)
+                'timing': {
+                    'descriptor_computation_time': descriptor_time,
+                    'query_time': query_time
+                },
+                'indices': {'desc_idx': desc_idx, 'scorer_idx': scorer_idx},
+                'predictions': {
+                    'ground_truth': ground_truth,
+                    'reconciled_results': reconciled_results
+                }
+            })
 
-            iteration += 1
+        # Save all results for this descriptor maker in one file
+        save_results_for_config(args.results_folder, desc_idx, all_results)
 
-        print(f"\nCompleted all {scorer_idx + 1} scorer configs for descriptor maker {desc_idx}")
+        print(f"\nCompleted all {len(all_results)} scorer configs for descriptor maker {desc_idx}")
+        print(f"Results saved to {args.results_folder}/{desc_idx:05d}.json")
 
     print(f"\n{'='*60}")
     print(f"GRID SEARCH COMPLETE")
-    print(f"Total iterations processed: {iteration}")
     print(f"{'='*60}")
 
 if __name__ == "__main__":
