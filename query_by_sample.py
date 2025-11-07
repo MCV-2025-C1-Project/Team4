@@ -34,6 +34,10 @@ def parse_arguments():
     parser.add_argument("--generate_masks", default=False, action='store_true')  # Generate masks using variance method.
     parser.add_argument("--multiple_paintings", default=True, action='store_true')  # Handle multiple paintings per query.
 
+    # Visualization options
+    parser.add_argument("--visualize", default=False, action='store_true')  # Display visualizations interactively.
+    parser.add_argument("--save_visualizations", type=str, default=None)  # Directory to save visualizations.
+
     return parser.parse_args()
 
 
@@ -95,19 +99,158 @@ def prepare_gt_and_results_for_mapk(gt: list[list[int]], results: list[list[list
     return new_gt, new_results
 
 
+def create_red_x_image(height: int, width: int) -> np.ndarray:
+    """
+    Create a white image with a red X overlay.
 
-# Display the query image and its corresponding results.
-def show_results(query, results):
-    plt.figure()  # Create a new figure for the query image.
-    plt.title('Query')
-    plt.imshow(cv2.cvtColor(query['image'], cv2.COLOR_BGR2RGB))
-    plt.show()
+    Args:
+        height: Image height
+        width: Image width
 
-    for i, entry in enumerate(results, start=1):
-        plt.figure()  # Create a new figure for each result image.
-        plt.title(f'Top {i}')
-        plt.imshow(cv2.cvtColor(entry['image'], cv2.COLOR_BGR2RGB))
+    Returns:
+        RGB image with red X
+    """
+    img = np.ones((height, width, 3), dtype=np.uint8) * 255
+
+    # Draw red X
+    thickness = max(5, min(height, width) // 50)
+    color = (255, 0, 0)  # Red in RGB
+
+    # Diagonal from top-left to bottom-right
+    cv2.line(img, (0, 0), (width - 1, height - 1), color, thickness)
+    # Diagonal from top-right to bottom-left
+    cv2.line(img, (width - 1, 0), (0, height - 1), color, thickness)
+
+    return img
+
+
+def resize_image_keep_aspect(image: np.ndarray, target_height: int) -> np.ndarray:
+    """
+    Resize image to target height while maintaining aspect ratio.
+
+    Args:
+        image: Input image
+        target_height: Desired height in pixels
+
+    Returns:
+        Resized image
+    """
+    h, w = image.shape[:2]
+    aspect_ratio = w / h
+    new_width = int(target_height * aspect_ratio)
+    return cv2.resize(image, (new_width, target_height), interpolation=cv2.INTER_AREA)
+
+
+def visualize_query_results(
+    query: dict,
+    query_ground_truth: list[int],
+    query_results: list[list[int]],
+    database: 'ImageDatabase',
+    display: bool = False,
+    save_path: str = None
+):
+    """
+    Create visualization of query results with query images, ground truth, and top-5 results.
+
+    Args:
+        query: Query dictionary containing 'images', 'masks', 'name', 'id'
+        query_ground_truth: List of ground truth IDs (one per painting in query)
+        query_results: List of top-k result IDs (one list per painting in query)
+        database: ImageDatabase instance to fetch result images
+        display: If True, display the visualization using matplotlib
+        save_path: If provided, save visualization to this path (e.g., "output/00000.png")
+    """
+    # Skip if neither display nor save is requested
+    if not display and save_path is None:
+        return
+
+    num_paintings = len(query['images'])
+
+    # Each row: Query | GT | Rank1 | Rank2 | Rank3 | Rank4 | Rank5
+    num_cols = 7
+
+    # Create figure with subplots
+    fig, axes = plt.subplots(num_paintings, num_cols, figsize=(20, 3 * num_paintings))
+
+    # Handle single painting case (axes won't be 2D)
+    if num_paintings == 1:
+        axes = axes.reshape(1, -1)
+
+    # Column titles
+    col_titles = ['Query', 'Ground Truth', 'Rank 1', 'Rank 2', 'Rank 3', 'Rank 4', 'Rank 5']
+
+    # Target height for resizing (to make images similar size)
+    target_height = 300
+
+    # Process each painting in the query
+    for painting_idx in range(num_paintings):
+        query_img = query['images'][painting_idx]
+        gt_id = query_ground_truth[painting_idx]
+        top_k_ids = query_results[painting_idx][:5]  # Top 5 results
+
+        # Pad with -1 if fewer than 5 results
+        while len(top_k_ids) < 5:
+            top_k_ids.append(-1)
+
+        # Column 0: Query image
+        query_rgb = cv2.cvtColor(query_img, cv2.COLOR_BGR2RGB)
+        query_resized = resize_image_keep_aspect(query_rgb, target_height)
+        axes[painting_idx, 0].imshow(query_resized)
+        axes[painting_idx, 0].axis('off')
+        if painting_idx == 0:
+            axes[painting_idx, 0].set_title(col_titles[0], fontsize=12, fontweight='bold')
+
+        # Column 1: Ground Truth
+        if gt_id == -1:
+            gt_img = create_red_x_image(target_height, target_height)
+        else:
+            # Find database image with matching ID
+            db_img = next((img.image for img in database.images if img.id == gt_id), None)
+            if db_img is not None:
+                gt_rgb = cv2.cvtColor(db_img, cv2.COLOR_BGR2RGB)
+                gt_img = resize_image_keep_aspect(gt_rgb, target_height)
+            else:
+                gt_img = create_red_x_image(target_height, target_height)
+
+        axes[painting_idx, 1].imshow(gt_img)
+        axes[painting_idx, 1].axis('off')
+        if painting_idx == 0:
+            axes[painting_idx, 1].set_title(col_titles[1], fontsize=12, fontweight='bold')
+
+        # Columns 2-6: Top 5 results
+        for rank_idx, result_id in enumerate(top_k_ids):
+            col_idx = rank_idx + 2
+
+            if result_id == -1:
+                result_img = create_red_x_image(target_height, target_height)
+            else:
+                # Find database image with matching ID
+                db_img = next((img.image for img in database.images if img.id == result_id), None)
+                if db_img is not None:
+                    result_rgb = cv2.cvtColor(db_img, cv2.COLOR_BGR2RGB)
+                    result_img = resize_image_keep_aspect(result_rgb, target_height)
+                else:
+                    result_img = create_red_x_image(target_height, target_height)
+
+            axes[painting_idx, col_idx].imshow(result_img)
+            axes[painting_idx, col_idx].axis('off')
+            if painting_idx == 0:
+                axes[painting_idx, col_idx].set_title(col_titles[col_idx], fontsize=12, fontweight='bold')
+
+    # Add main title with query ID
+    fig.suptitle(f"Query {query['id']:05d} - {query['name']}", fontsize=14, fontweight='bold')
+    plt.tight_layout()
+
+    # Save if path provided
+    if save_path is not None:
+        os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else '.', exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+
+    # Display if requested
+    if display:
         plt.show()
+    else:
+        plt.close(fig)  # Close to free memory if not displaying
 
 
 # Main function to execute the query-by-sample process.
@@ -138,6 +281,9 @@ def main():
     print("\nQuery Processing:")
     print(f"  Multiple paintings detection: {args.multiple_paintings}")
     print(f"  Mask generation (HSV S+V variance): {args.generate_masks}")
+    print("\nVisualization:")
+    print(f"  Display visualizations: {args.visualize}")
+    print(f"  Save visualizations: {args.save_visualizations if args.save_visualizations else 'No'}")
     print()
 
     print("Loading database...")
@@ -200,7 +346,7 @@ def main():
 
     print("\nQuerying...")
     results = []
-    for query in queries:
+    for query_idx, query in enumerate(queries):
         query_image_results = []
         for img, mask in zip(query['images'], query['masks']):
             # Compute keypoints and descriptors for query
@@ -219,6 +365,26 @@ def main():
             query_image_results.append(top_k_ids)
 
         results.append(query_image_results)
+
+        # Generate visualization if requested
+        if args.visualize or args.save_visualizations:
+            save_path = None
+            if args.save_visualizations:
+                save_path = os.path.join(args.save_visualizations, f"{query['id']:05d}.png")
+
+            if ground_truth is not None:
+                query_gt = ground_truth[query_idx]
+            else:
+                query_gt = [-1] * len(query_image_results)
+
+            visualize_query_results(
+                query=query,
+                query_ground_truth=query_gt,
+                query_results=query_image_results,
+                database=database,
+                display=args.visualize,
+                save_path=save_path
+            )
 
     if ground_truth is not None:
         print("\nEvaluating results...")
@@ -251,6 +417,11 @@ def main():
         with open(args.pkl_output_path, "wb") as f:
             pickle.dump(reconciled_results if ground_truth is not None else results, f)
         print("  Done!")
+
+    # Summary of visualizations
+    if args.save_visualizations:
+        print(f"\nVisualizations saved to: {args.save_visualizations}")
+        print(f"  Total visualizations: {len(queries)}")
 
     print("\n" + "="*60)
     print("Query-by-Sample Complete")
