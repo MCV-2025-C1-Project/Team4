@@ -995,7 +995,7 @@ class HomographyScorer(Scorer):
         reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
 
         det = np.linalg.det(M[:2, :2])
-        if det <= 0.4 or det > 10:  # Negative det is a flip, det too large/small is bad
+        if det <= 0.4 or det > 9999:  # Negative det is a flip, det too small is bad, but apparently too large is A-OK
             valid = False
         elif reproj_error > self.max_reproj_error:
             valid = False
