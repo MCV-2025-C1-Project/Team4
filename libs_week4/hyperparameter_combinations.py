@@ -140,12 +140,13 @@ def generate_kaze_configs() -> Iterator[Dict[str, Any]]:
     #     'n_octave_layers': [4, 5]
     # }
 
-    # REDUCED GRID (6 configs): Keep full grid - KAZE is float version of AKAZE, might be better
-    # Already at target size (6 configs)
+    # REDUCED GRID (4 configs): Increased threshold to reduce excessive keypoints
+    # threshold=0.0001 generates 24k+ keypoints (way too many, very slow)
+    # Increasing to [0.001, 0.003] for reasonable keypoint counts
     param_grid = {
         'extended': [False],
         'upright': [False],
-        'threshold': [0.0001, 0.001, 0.003],
+        'threshold': [0.001, 0.003],  # Removed 0.0001 - too many keypoints
         'n_octaves': [4],
         'n_octave_layers': [4, 5]
     }
@@ -222,7 +223,11 @@ def generate_gloh_configs() -> Iterator[Dict[str, Any]]:
 def generate_pcasift_configs() -> Iterator[Dict[str, Any]]:
     param_grid = {
         'num_components': [24, 36, 48],
-        'n_features': [500, 1000, 1500, 2000] # SIFT param
+        'n_features': [500, 1000, 1500, 2000], # SIFT param
+        'n_octave_layers': [4],
+        'contrast_threshold': [0.03, 0.04],
+        'sigma': [1.6, 2.0],
+        'edge_threshold': [15]
     }
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
@@ -249,8 +254,8 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     # for config in generate_brisk_configs(): # bad too many keypoints
         # yield BRISKDescriptor(**config) # bad too many keypoints
 
-    for config in generate_kaze_configs(): # float version of AKAZE, might be better
-        yield KAZEDescriptor(**config) # float version of AKAZE, might be better
+    # for config in generate_kaze_configs(): # float version of AKAZE, might be better
+        # yield KAZEDescriptor(**config) # float version of AKAZE, might be better
 
     # one akaza config fails (no keypoints detected maybe)
     # for config in generate_akaze_configs(): # bad performs pretty bad
@@ -266,8 +271,8 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
         # yield GLOHDescriptor(**config) # bad pefrorms like shit
     
     # FIXME: the PCA should be run only once for the whole database end then we have to transform all images when computing the descriptor
-    # for config in generate_pcasift_configs(): # bad performs pretty bad
-        # yield PCASIFTDescriptor(**config) # bad performs pretty bad
+    for config in generate_pcasift_configs(): # bad performs pretty bad
+        yield PCASIFTDescriptor(**config) # bad performs pretty bad
 
 
 def generate_color_space_combinations() -> list[list[ColorSpace]]:

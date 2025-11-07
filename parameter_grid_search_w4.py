@@ -21,6 +21,7 @@ import grid_background_removal_week3
 
 # --- Imports the NEW generator from Week 4 ---
 from libs_week4.hyperparameter_combinations import descriptor_maker_grid_search, scorer_grid_search
+from libs_week4.descriptor import FittableDescriptorComputer
 
 
 def parse_arguments():
@@ -109,6 +110,17 @@ def main():
         print("\nDescriptor Configuration:", flush=True)
         print(json.dumps(descriptor_dict, indent=2), flush=True)
 
+        # Check if descriptor needs fitting (e.g., PCA-SIFT)
+        if isinstance(descriptor_maker.descriptor_computer, FittableDescriptorComputer):
+            print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Descriptor needs fitting. Fitting on database...", flush=True)
+            db_images, db_masks = database.get_images_and_masks()
+            start_time_fitting = time.time()
+            descriptor_maker.descriptor_computer.fit(db_images, db_masks)
+            fitting_time = time.time() - start_time_fitting
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Fitting time: {fitting_time:.2f}s", flush=True)
+        else:
+            fitting_time = 0.0
+
         # COMPUTE DESCRIPTORS ONCE for this descriptor maker
         print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Computing descriptors for entire database...", flush=True)
         start_time_descriptors = time.time()
@@ -186,6 +198,7 @@ def main():
                 },
                 'metrics': {'map@k1': map1, 'map@k5': map5},
                 'timing': {
+                    'fitting_time': fitting_time,
                     'descriptor_computation_time': descriptor_time,
                     'query_time': query_time
                 },

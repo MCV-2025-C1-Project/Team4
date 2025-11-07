@@ -129,6 +129,22 @@ class DescriptorComputer(abc.ABC):
         """Returns whether this descriptor produces float or binary values."""
         pass
 
+    def needs_fitting(self) -> bool:
+        return False
+
+
+class FittableDescriptorComputer(DescriptorComputer):
+    @abc.abstractmethod
+    def fit(self, images: list[np.ndarray], masks: list[np.ndarray | None] = None):
+        pass
+
+    def needs_fitting(self) -> bool:
+        return True
+
+    @abc.abstractmethod
+    def is_fitted(self) -> bool:
+        pass
+
 
 class ORBDescriptor(DescriptorComputer):
     def __init__(self, n_features: int = 500, scale_factor: float = 1.2, n_levels: int = 8,
@@ -456,65 +472,113 @@ class SURFDescriptor(DescriptorComputer):
         return DescriptorValueType.FLOAT
 
 
-class PCASIFTDescriptor(DescriptorComputer):
-    def __init__(self, 
+class PCASIFTDescriptor(FittableDescriptorComputer):
+    def __init__(self,
                  num_components: int = 128, # A more common value than 128
-                 n_features: int = 0, 
-                 n_octave_layers: int = 3, 
-                 contrast_threshold: float = 0.04, 
-                 edge_threshold: float = 10, 
+                 n_features: int = 0,
+                 n_octave_layers: int = 3,
+                 contrast_threshold: float = 0.04,
+                 edge_threshold: float = 10,
                  sigma: float = 1.6):
-        
+
         # SIFT parameters
         self.n_features = n_features
         self.n_octave_layers = n_octave_layers
         self.contrast_threshold = contrast_threshold
         self.edge_threshold = edge_threshold
         self.sigma = sigma
-        
+
         # PCA parameters
         self.num_components = num_components
-        
+
         # Create SIFT object
         # Handle different OpenCV versions (contrib vs. main)
         try:
-            self.sift = cv2.SIFT_create(nfeatures=n_features, 
-                                        nOctaveLayers=n_octave_layers, 
-                                        contrastThreshold=contrast_threshold, 
-                                        edgeThreshold=edge_threshold, 
+            self.sift = cv2.SIFT_create(nfeatures=n_features,
+                                        nOctaveLayers=n_octave_layers,
+                                        contrastThreshold=contrast_threshold,
+                                        edgeThreshold=edge_threshold,
                                         sigma=sigma)
         except AttributeError:
-            self.sift = cv2.xfeatures2d.SIFT_create(nfeatures=n_features, 
-                                                   nOctaveLayers=n_octave_layers, 
-                                                   contrastThreshold=contrast_threshold, 
-                                                   edgeThreshold=edge_threshold, 
+            self.sift = cv2.xfeatures2d.SIFT_create(nfeatures=n_features,
+                                                   nOctaveLayers=n_octave_layers,
+                                                   contrastThreshold=contrast_threshold,
+                                                   edgeThreshold=edge_threshold,
                                                    sigma=sigma)
-        
 
+        # PCA will be fitted on the database
+        self.pca = None
+        self._is_fitted = False
+
+    def fit(self, images: list[np.ndarray], masks: list[np.ndarray | None] = None):
+        """
+        Fit PCA on SIFT descriptors from all database images.
+
+        Args:
+            images: List of database images
+            masks: Optional list of masks for each image
+        """
+        if masks is None:
+            masks = [None] * len(images)
+
+        # Collect all SIFT descriptors from all images
+        all_descriptors = []
+
+        for image, mask in zip(images, masks):
+            if len(image.shape) == 3:
+                gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+            else:
+                gray = (image * 255).astype(np.uint8)
+
+            _, descriptors = self.sift.detectAndCompute(gray, mask)
+
+            if descriptors is not None and len(descriptors) > 0:
+                all_descriptors.append(descriptors)
+
+        if not all_descriptors:
+            raise ValueError("No SIFT descriptors found in database images. Cannot fit PCA.")
+
+        # Concatenate all descriptors
+        all_descriptors_array = np.vstack(all_descriptors)
+
+        # Check if we have enough samples
+        if all_descriptors_array.shape[0] < self.num_components:
+            raise ValueError(
+                f"Not enough descriptors ({all_descriptors_array.shape[0]}) "
+                f"to fit PCA with {self.num_components} components. "
+                f"Reduce num_components or use more images."
+            )
+
+        # Fit PCA on all descriptors
         self.pca = PCA(n_components=self.num_components)
-        
+        self.pca.fit(all_descriptors_array)
+        self._is_fitted = True
+
+    def is_fitted(self) -> bool:
+        """Returns whether PCA has been fitted."""
+        return self._is_fitted
+
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
-        
+
+        if not self.is_fitted():
+            raise RuntimeError(
+                "PCASIFTDescriptor must be fitted on database images before use. "
+                "Call fit() with database images first."
+            )
+
         if len(image.shape) == 3:
             gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
-        
+
         # 1. Detect keypoints and compute SIFT descriptors
         keypoints, descriptors = self.sift.detectAndCompute(gray, mask)
-        
+
         if descriptors is None or len(descriptors) == 0:
             return keypoints, np.array([])
 
-        try:
-            pca_descriptors = self.pca.fit_transform(descriptors)
-        except ValueError as e:
-            # This can happen if n_features < num_components
-            print(f"PCA Error: {e}. Returning empty descriptors.")
-            print("This often happens if the number of detected keypoints "
-                  f"({len(descriptors)}) is less than num_components ({self.num_components}).")
-            return keypoints, np.array([])
-
+        # 2. Transform using the fitted PCA (not fit_transform!)
+        pca_descriptors = self.pca.transform(descriptors)
 
         # 3. Normalize the PCA-SIFT descriptors
         normalized_pca_descriptors = cv2.normalize(pca_descriptors, None)
@@ -529,18 +593,19 @@ class PCASIFTDescriptor(DescriptorComputer):
         norms = np.linalg.norm(root_sift_descriptors, axis=1, keepdims=True)
         norms[norms == 0] = 1.0 # Avoid division by zero
         final_descriptors = root_sift_descriptors / norms
-        
+
         return keypoints, final_descriptors
     
     def to_dict(self) -> dict[str, Any]:
         return {
-            "type": "PCA-SIFT-Root (Flawed)",
+            "type": "PCA-SIFT-Root",
             "n_features": self.n_features,
             "n_octave_layers": self.n_octave_layers,
             "contrast_threshold": self.contrast_threshold,
             "edge_threshold": self.edge_threshold,
             "sigma": self.sigma,
-            "num_components": self.num_components
+            "num_components": self.num_components,
+            "is_fitted": self.is_fitted()
         }
 
     def get_value_type(self) -> DescriptorValueType:

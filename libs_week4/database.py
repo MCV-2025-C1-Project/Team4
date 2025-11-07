@@ -32,6 +32,11 @@ class ImageDatabase:
             image.score = None
             image.info = None
 
+    def get_images_and_masks(self) -> tuple[list[np.ndarray], list[np.ndarray]]:
+        images = [img.image for img in self.images]
+        masks = [img.mask for img in self.images]
+        return images, masks
+
     def compute_keypoints_and_descriptors(self, descriptor_maker: KeypointAndDescriptorMaker):
         for image in tqdm.tqdm(self.images):
             image.keypoints, image.descriptors = descriptor_maker.detect_and_compute(image.image, image.mask)
