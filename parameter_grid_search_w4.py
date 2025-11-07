@@ -8,6 +8,7 @@ import pickle
 import json
 from pathlib import Path
 import sys
+from datetime import datetime
 
 # --- Fixes ModuleNotFoundError by adding project root to path ---
 project_root = Path(__file__).resolve().parent
@@ -86,10 +87,10 @@ def main():
     args = parse_arguments()
     os.makedirs(args.results_folder, exist_ok=True)
 
-    print("Loading database...")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Loading database...", flush=True)
     database = ImageDatabase.load(args.database_path)
 
-    print("Loading queries...")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Loading queries...", flush=True)
     queries, ground_truth = load_queries(args.queries_path)
 
     # OUTER LOOP: Iterate over descriptor makers
@@ -99,27 +100,27 @@ def main():
         if desc_idx < args.from_iter or (desc_idx - args.from_iter) % args.every != 0:
             continue
 
-        print(f"\n{'='*60}")
-        print(f"DESCRIPTOR MAKER {desc_idx}")
-        print(f"{'='*60}")
+        print(f"\n{'='*60}", flush=True)
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] DESCRIPTOR MAKER {desc_idx}", flush=True)
+        print(f"{'='*60}", flush=True)
 
         # Pretty print the descriptor maker configuration
         descriptor_dict = descriptor_maker.to_dict()
-        print("\nDescriptor Configuration:")
-        print(json.dumps(descriptor_dict, indent=2))
+        print("\nDescriptor Configuration:", flush=True)
+        print(json.dumps(descriptor_dict, indent=2), flush=True)
 
         # COMPUTE DESCRIPTORS ONCE for this descriptor maker
-        print("\nComputing descriptors for entire database...")
+        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Computing descriptors for entire database...", flush=True)
         start_time_descriptors = time.time()
         database.reset_descriptors_distances_and_scores()
         database.compute_keypoints_and_descriptors(descriptor_maker)
         descriptor_time = time.time() - start_time_descriptors
-        print(f"Descriptor computation time: {descriptor_time:.2f}s")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Descriptor computation time: {descriptor_time:.2f}s", flush=True)
 
         # Compute and print statistics
         stats = database.compute_keypoint_descriptor_statistics()
-        print("\nKeypoint & Descriptor Statistics:")
-        print(json.dumps(stats, indent=2))
+        print("\nKeypoint & Descriptor Statistics:", flush=True)
+        print(json.dumps(stats, indent=2), flush=True)
 
         # Store results for all scorer configurations
         all_results = []
@@ -130,9 +131,9 @@ def main():
             matcher = scorer_config['matcher']
             scorer = scorer_config['scorer']
 
-            print(f"\n--- Scorer {scorer_idx}: "
+            print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] --- Scorer {scorer_idx}: "
                   f"ratio={matcher.ratio_test_threshold:.2f}, "
-                  f"ransac={scorer.ransac_thresh:.1f}, min_pts={scorer.min_points} ---")
+                  f"ransac={scorer.ransac_thresh:.1f}, min_pts={scorer.min_points} ---", flush=True)
 
             # Query and evaluate WITHOUT recomputing descriptors
             start_time_query = time.time()
@@ -151,7 +152,7 @@ def main():
                 results_top_5.append(query_image_results)
 
             query_time = time.time() - start_time_query
-            print(f"  Query processing time: {query_time:.2f}s")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]   Query processing time: {query_time:.2f}s", flush=True)
 
             # Reconciliation block to handle detection mismatches robustly
             reconciled_results = []
@@ -174,7 +175,7 @@ def main():
             map5 = mapk(map_gt, map_top_5, k=5)
             map1 = mapk(map_gt, map_top_5, k=1)
 
-            print(f"  --> Results: map@k1={map1:.4f}, map@k5={map5:.4f}")
+            print(f"  --> Results: map@k1={map1:.4f}, map@k5={map5:.4f}", flush=True)
 
             # Append results with BOTH descriptor maker and scorer parameters
             all_results.append({
@@ -199,12 +200,12 @@ def main():
         # Save all results for this descriptor maker in one file
         save_results_for_config(args.results_folder, desc_idx, all_results)
 
-        print(f"\nCompleted all {len(all_results)} scorer configs for descriptor maker {desc_idx}")
-        print(f"Results saved to {args.results_folder}/{desc_idx:05d}.json")
+        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Completed all {len(all_results)} scorer configs for descriptor maker {desc_idx}", flush=True)
+        print(f"Results saved to {args.results_folder}/{desc_idx:05d}.json", flush=True)
 
-    print(f"\n{'='*60}")
-    print(f"GRID SEARCH COMPLETE")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}", flush=True)
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] GRID SEARCH COMPLETE", flush=True)
+    print(f"{'='*60}", flush=True)
 
 if __name__ == "__main__":
     main()
