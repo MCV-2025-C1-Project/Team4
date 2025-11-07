@@ -1033,6 +1033,334 @@ class HomographyScorer(Scorer):
         return d
 
 
+class MatchRatioScorer(Scorer):
+    """
+    Simple baseline scorer that uses match ratio without geometric verification.
+    Score = num_good_matches / num_query_keypoints
+
+    WARNING: This will favor database images with many keypoints.
+    Use as a baseline to verify that geometric verification adds value.
+    """
+    def __init__(self, matcher: DescriptorMatcher, min_matches: int = 10):
+        super().__init__(matcher)
+        self.min_matches = min_matches
+
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors,
+              database_image: np.ndarray, database_keypoints, database_descriptors):
+
+        if query_descriptors is None or database_descriptors is None:
+            return False, 0.0, {"reason": "no_descriptors"}
+
+        if len(query_descriptors) == 0 or len(database_descriptors) == 0:
+            return False, 0.0, {"reason": "no_descriptors"}
+
+        # Get good matches using ratio test
+        good_matches = self.matcher.match(query_descriptors, database_descriptors)
+
+        if len(good_matches) < self.min_matches:
+            return False, 0.0, {"reason": "not_enough_matches"}
+
+        # Simple ratio: matches / query keypoints
+        match_ratio = len(good_matches) / len(query_keypoints)
+
+        info = {
+            "num_matches": len(good_matches),
+            "num_query_keypoints": len(query_keypoints),
+            "num_database_keypoints": len(database_keypoints),
+            "match_ratio": float(match_ratio)
+        }
+
+        return True, float(match_ratio), info
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d['min_matches'] = self.min_matches
+        return d
+
+
+class SymmetricMatchRatioScorer(Scorer):
+    """
+    Normalized match ratio scorer that accounts for both query and database keypoint counts.
+    Score = num_good_matches / sqrt(num_query_keypoints * num_database_keypoints)
+
+    This is the symmetric normalization suggested in the FIXME comment.
+    Prevents database images with excessive keypoints from dominating.
+    """
+    def __init__(self, matcher: DescriptorMatcher, min_matches: int = 10):
+        super().__init__(matcher)
+        self.min_matches = min_matches
+
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors,
+              database_image: np.ndarray, database_keypoints, database_descriptors):
+
+        if query_descriptors is None or database_descriptors is None:
+            return False, 0.0, {"reason": "no_descriptors"}
+
+        if len(query_descriptors) == 0 or len(database_descriptors) == 0:
+            return False, 0.0, {"reason": "no_descriptors"}
+
+        # Get good matches using ratio test
+        good_matches = self.matcher.match(query_descriptors, database_descriptors)
+
+        if len(good_matches) < self.min_matches:
+            return False, 0.0, {"reason": "not_enough_matches"}
+
+        # Symmetric normalization: sqrt(query_kpts * db_kpts)
+        normalization_factor = np.sqrt(len(query_keypoints) * len(database_keypoints))
+        symmetric_ratio = len(good_matches) / normalization_factor
+
+        info = {
+            "num_matches": len(good_matches),
+            "num_query_keypoints": len(query_keypoints),
+            "num_database_keypoints": len(database_keypoints),
+            "symmetric_ratio": float(symmetric_ratio),
+            "normalization_factor": float(normalization_factor)
+        }
+
+        return True, float(symmetric_ratio), info
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d['min_matches'] = self.min_matches
+        return d
+
+
+class HomographyDistanceScorer(Scorer):
+    """
+    Combines homography-based inlier ratio with descriptor distance consistency.
+
+    Hypothesis: Good matches should have consistent descriptor distances.
+    Lower std/mean ratio indicates more confident matching.
+
+    Score = inlier_ratio * distance_consistency_score
+    where distance_consistency = 1 / (1 + std/mean)
+    """
+    def __init__(self, matcher: DescriptorMatcher,
+                 ransac_thresh: float = 5.0,
+                 max_reproj_error: float = 5.0,
+                 min_points: int = 20,
+                 distance_weight: float = 0.3):
+        super().__init__(matcher)
+        self.ransac_thresh = ransac_thresh
+        self.max_reproj_error = max_reproj_error
+        self.min_points = min_points
+        self.distance_weight = distance_weight
+
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors,
+              database_image: np.ndarray, database_keypoints, database_descriptors):
+
+        src_kpts, src_desc, dst_kpts, dst_desc = self.matcher.match_keypoints_descriptors(
+            query_keypoints, query_descriptors, database_keypoints, database_descriptors)
+
+        if len(src_kpts) < self.min_points:
+            return False, 0.0, {"reason": "not_enough_points"}
+
+        src_pts = np.float32([kpt.pt for kpt in src_kpts])
+        dst_pts = np.float32([kpt.pt for kpt in dst_kpts])
+
+        M, mask = cv2.findHomography(src_pts, dst_pts, method=cv2.RANSAC,
+                                      ransacReprojThreshold=self.ransac_thresh)
+
+        if M is None or mask is None:
+            return False, 0.0, {"reason": "homography_failed"}
+
+        inliers = mask.ravel().astype(bool)
+        n_inliers = np.sum(inliers)
+        inlier_ratio = n_inliers / len(src_pts)
+
+        src_inliers = src_pts[inliers]
+        dst_inliers = dst_pts[inliers]
+
+        if len(src_inliers) == 0:
+            return False, 0.0, {"reason": "no_inliers"}
+
+        # Compute reprojection error
+        src_proj = cv2.perspectiveTransform(src_inliers.reshape(-1, 1, 2), M).reshape(-1, 2)
+        reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
+
+        # Check homography validity
+        det = np.linalg.det(M[:2, :2])
+        if det <= 0.4 or det > 10:
+            valid = False
+        elif reproj_error > self.max_reproj_error:
+            valid = False
+        else:
+            valid = True
+
+        # Compute match distance statistics for inliers
+        # Get original matches to access distances
+        matches = self.matcher.match(query_descriptors, database_descriptors)
+        inlier_matches = [m for i, m in enumerate(matches) if i < len(inliers) and inliers[i]]
+
+        if len(inlier_matches) > 0:
+            distances = [m.distance for m in inlier_matches]
+            distance_mean = np.mean(distances)
+            distance_std = np.std(distances)
+
+            # Avoid division by zero
+            if distance_mean > 0:
+                distance_consistency = 1.0 / (1.0 + distance_std / distance_mean)
+            else:
+                distance_consistency = 0.5  # Neutral value
+        else:
+            distance_consistency = 0.5
+
+        # Combined score: geometric quality * distance consistency
+        geometric_score = inlier_ratio
+        score = geometric_score * (1.0 - self.distance_weight + self.distance_weight * distance_consistency)
+
+        info = {
+            "n_inliers": int(n_inliers),
+            "total_matches": int(len(src_pts)),
+            "inlier_ratio": float(inlier_ratio),
+            "reproj_error": float(reproj_error),
+            "det": float(det),
+            "distance_mean": float(distance_mean) if len(inlier_matches) > 0 else None,
+            "distance_std": float(distance_std) if len(inlier_matches) > 0 else None,
+            "distance_consistency": float(distance_consistency)
+        }
+
+        return valid, float(score), info
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d['ransac_thresh'] = self.ransac_thresh
+        d['max_reproj_error'] = self.max_reproj_error
+        d['min_points'] = self.min_points
+        d['distance_weight'] = self.distance_weight
+        return d
+
+
+class MultiFactorScorer(Scorer):
+    """
+    EXPERIMENTAL: Multi-factor scorer combining multiple signals.
+
+    Combines:
+    1. Inlier ratio (geometric quality)
+    2. Reprojection error (spatial accuracy)
+    3. Match distance (descriptor confidence)
+
+    Score = w1*inlier_score + w2*reproj_score + w3*distance_score
+
+    TODO: Grid search over weights to find optimal combination.
+    This is marked for future exploration if time permits.
+    """
+    def __init__(self, matcher: DescriptorMatcher,
+                 ransac_thresh: float = 5.0,
+                 max_reproj_error: float = 5.0,
+                 min_points: int = 20,
+                 inlier_weight: float = 0.5,
+                 reproj_weight: float = 0.3,
+                 distance_weight: float = 0.2):
+        super().__init__(matcher)
+        self.ransac_thresh = ransac_thresh
+        self.max_reproj_error = max_reproj_error
+        self.min_points = min_points
+        self.inlier_weight = inlier_weight
+        self.reproj_weight = reproj_weight
+        self.distance_weight = distance_weight
+
+        # Normalize weights to sum to 1
+        total_weight = inlier_weight + reproj_weight + distance_weight
+        self.inlier_weight /= total_weight
+        self.reproj_weight /= total_weight
+        self.distance_weight /= total_weight
+
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors,
+              database_image: np.ndarray, database_keypoints, database_descriptors):
+
+        src_kpts, src_desc, dst_kpts, dst_desc = self.matcher.match_keypoints_descriptors(
+            query_keypoints, query_descriptors, database_keypoints, database_descriptors)
+
+        if len(src_kpts) < self.min_points:
+            return False, 0.0, {"reason": "not_enough_points"}
+
+        src_pts = np.float32([kpt.pt for kpt in src_kpts])
+        dst_pts = np.float32([kpt.pt for kpt in dst_kpts])
+
+        M, mask = cv2.findHomography(src_pts, dst_pts, method=cv2.RANSAC,
+                                      ransacReprojThreshold=self.ransac_thresh)
+
+        if M is None or mask is None:
+            return False, 0.0, {"reason": "homography_failed"}
+
+        inliers = mask.ravel().astype(bool)
+        n_inliers = np.sum(inliers)
+        inlier_ratio = n_inliers / len(src_pts)
+
+        src_inliers = src_pts[inliers]
+        dst_inliers = dst_pts[inliers]
+
+        if len(src_inliers) == 0:
+            return False, 0.0, {"reason": "no_inliers"}
+
+        # Compute reprojection error
+        src_proj = cv2.perspectiveTransform(src_inliers.reshape(-1, 1, 2), M).reshape(-1, 2)
+        reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
+
+        # Check homography validity
+        det = np.linalg.det(M[:2, :2])
+        if det <= 0.4 or det > 10:
+            valid = False
+        elif reproj_error > self.max_reproj_error:
+            valid = False
+        else:
+            valid = True
+
+        # Factor 1: Inlier ratio (0 to 1, higher is better)
+        inlier_score = inlier_ratio
+
+        # Factor 2: Reprojection error (convert to 0-1, lower error is better)
+        reproj_score = 1.0 / (1.0 + reproj_error / self.max_reproj_error)
+
+        # Factor 3: Match distance consistency
+        matches = self.matcher.match(query_descriptors, database_descriptors)
+        inlier_matches = [m for i, m in enumerate(matches) if i < len(inliers) and inliers[i]]
+
+        if len(inlier_matches) > 0:
+            distances = [m.distance for m in inlier_matches]
+            distance_median = np.median(distances)
+            # Normalize: lower distance is better (convert to 0-1 score)
+            # Assume max distance around 200 for ORB, 0.5 for SIFT (normalize later)
+            distance_score = 1.0 / (1.0 + distance_median / 100.0)
+        else:
+            distance_score = 0.5
+
+        # Weighted combination
+        score = (self.inlier_weight * inlier_score +
+                 self.reproj_weight * reproj_score +
+                 self.distance_weight * distance_score)
+
+        info = {
+            "n_inliers": int(n_inliers),
+            "total_matches": int(len(src_pts)),
+            "inlier_ratio": float(inlier_ratio),
+            "reproj_error": float(reproj_error),
+            "det": float(det),
+            "inlier_score": float(inlier_score),
+            "reproj_score": float(reproj_score),
+            "distance_score": float(distance_score),
+            "final_score": float(score),
+            "weights": {
+                "inlier": self.inlier_weight,
+                "reproj": self.reproj_weight,
+                "distance": self.distance_weight
+            }
+        }
+
+        return valid, float(score), info
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d['ransac_thresh'] = self.ransac_thresh
+        d['max_reproj_error'] = self.max_reproj_error
+        d['min_points'] = self.min_points
+        d['inlier_weight'] = self.inlier_weight
+        d['reproj_weight'] = self.reproj_weight
+        d['distance_weight'] = self.distance_weight
+        return d
+
+
 class KeypointAndDescriptorMaker:
     def __init__(self, *, descriptor_computer: DescriptorComputer, color_conversion: ColorConversion, preprocess: ImagePreprocessStep | None = None):
 

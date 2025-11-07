@@ -10,9 +10,11 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
 
 from libs_week4.descriptor import (
-    DescriptorComputer, HomographyScorer, ORBDescriptor, DaisyDescriptor, SIFTDescriptor, RootSIFTDescriptor, BRISKDescriptor,
-    KAZEDescriptor, AKAZEDescriptor, PCASIFTDescriptor, HOGDescriptor, GLOHDescriptor,
-    DescriptorMatcher, KeypointAndDescriptorMaker, SURFDescriptor, DescriptorValueType
+    DescriptorComputer, HomographyScorer, MatchRatioScorer, SymmetricMatchRatioScorer,
+    HomographyDistanceScorer, MultiFactorScorer, ORBDescriptor, DaisyDescriptor, SIFTDescriptor,
+    RootSIFTDescriptor, BRISKDescriptor, KAZEDescriptor, AKAZEDescriptor, PCASIFTDescriptor,
+    HOGDescriptor, GLOHDescriptor, DescriptorMatcher, KeypointAndDescriptorMaker, SURFDescriptor,
+    DescriptorValueType
 )
 from libs_week3.color_conversion import ColorConversion, ColorSpace
 import libs_week3.preprocessing as preprocessing
@@ -306,7 +308,94 @@ def descriptor_maker_grid_search() -> Iterator[KeypointAndDescriptorMaker]:
                     preprocess=preprocess
                 )
 
-def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker) -> Iterator[Dict[str, Any]]:
+def generate_alternative_scorers(descriptor_maker: KeypointAndDescriptorMaker) -> Iterator[Dict[str, Any]]:
+    """
+    Generate alternative scorer configurations to compare against HomographyScorer.
+
+    Tests:
+    1. MatchRatioScorer - Simple baseline (no geometric verification)
+    2. SymmetricMatchRatioScorer - Normalized baseline
+    3. HomographyDistanceScorer - Homography + distance consistency
+
+    Args:
+        descriptor_maker: The KeypointAndDescriptorMaker to generate scorers for
+
+    Yields:
+        Dictionary containing 'matcher' and 'scorer' keys
+    """
+    # Determine the appropriate norm type
+    descriptor_value_type = descriptor_maker.descriptor_computer.get_value_type()
+
+    if descriptor_value_type == DescriptorValueType.FLOAT:
+        norm_type = cv2.NORM_L2
+    else:  # BINARY
+        norm_type = cv2.NORM_HAMMING
+
+    # Use the best ratio from previous experiments
+    ratio_threshold = 0.7
+
+    matcher = DescriptorMatcher(
+        matcher_type='BF',
+        norm_type=norm_type,
+        ratio_test_threshold=ratio_threshold,
+        cross_check=False
+    )
+
+    # Config 1: Simple Match Ratio (baseline - no homography)
+    yield {
+        'matcher': matcher,
+        'scorer': MatchRatioScorer(matcher, min_matches=10)
+    }
+
+    # Config 2: Symmetric Match Ratio (normalized baseline)
+    yield {
+        'matcher': matcher,
+        'scorer': SymmetricMatchRatioScorer(matcher, min_matches=10)
+    }
+
+    # Config 3: Homography + Distance Consistency (light weight)
+    yield {
+        'matcher': matcher,
+        'scorer': HomographyDistanceScorer(
+            matcher,
+            ransac_thresh=3.0,
+            max_reproj_error=3.0,
+            min_points=20,
+            distance_weight=0.2  # Light emphasis on distance consistency
+        )
+    }
+
+    # Config 4: Homography + Distance Consistency (moderate weight)
+    yield {
+        'matcher': matcher,
+        'scorer': HomographyDistanceScorer(
+            matcher,
+            ransac_thresh=3.0,
+            max_reproj_error=3.0,
+            min_points=20,
+            distance_weight=0.4  # More emphasis on distance consistency
+        )
+    }
+
+    # NOTE: MultiFactorScorer is implemented but commented out for later exploration
+    # It requires more extensive tuning of weights (inlier, reproj, distance)
+    # Uncomment and add grid search if time permits:
+    #
+    # yield {
+    #     'matcher': matcher,
+    #     'scorer': MultiFactorScorer(
+    #         matcher,
+    #         ransac_thresh=3.0,
+    #         max_reproj_error=3.0,
+    #         min_points=20,
+    #         inlier_weight=0.5,
+    #         reproj_weight=0.3,
+    #         distance_weight=0.2
+    #     )
+    # }
+
+
+def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker, include_alternative_scorers: bool = False) -> Iterator[Dict[str, Any]]:
     """
     Generator for scorer configurations for a given descriptor maker.
 
@@ -318,10 +407,17 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker) -> Iterator
 
     Args:
         descriptor_maker: The KeypointAndDescriptorMaker to generate scorers for
+        include_alternative_scorers: If True, also yield alternative scorer types
+                                     (MatchRatio, SymmetricMatchRatio, HomographyDistance)
 
     Yields:
         Dictionary containing 'matcher' and 'scorer' keys
     """
+
+    # First, yield alternative scorers if requested
+    if include_alternative_scorers:
+        for scorer_config in generate_alternative_scorers(descriptor_maker):
+            yield scorer_config
     # Determine the appropriate norm type based on descriptor value type
     descriptor_value_type = descriptor_maker.descriptor_computer.get_value_type()
 
