@@ -9,8 +9,6 @@ import json
 from pathlib import Path
 import sys
 
-from libs_week4.descriptor import KeypointAndDescriptorMaker
-
 # --- Fixes ModuleNotFoundError by adding project root to path ---
 project_root = Path(__file__).resolve().parent
 sys.path.append(str(project_root))
@@ -21,7 +19,7 @@ from libs_week3.average_precision import mapk
 import grid_background_removal_week3
 
 # --- Imports the NEW generator from Week 4 ---
-from libs_week4.hyperparameter_combinations import keypoint_hyperparameter_grid_search
+from libs_week4.hyperparameter_combinations import descriptor_maker_grid_search, scorer_grid_search
 
 
 def parse_arguments():
@@ -94,72 +92,98 @@ def main():
     print("Loading queries...")
     queries, ground_truth = load_queries(args.queries_path)
 
-    for i, params in enumerate(keypoint_hyperparameter_grid_search()):
-        if i < args.from_iter or (i - args.from_iter) % args.every != 0:
-            continue
+    iteration = 0
 
-        descriptor_maker: KeypointAndDescriptorMaker = params['keypoint_and_descriptor_maker']
-        matcher = params['matcher']
-        scorer = params['scorer']
+    # OUTER LOOP: Iterate over descriptor makers
+    for desc_idx, descriptor_maker in enumerate(descriptor_maker_grid_search()):
 
-        print(f"\n--- Iteration {i:04d}: Descriptor: {descriptor_maker.descriptor_computer.to_dict()['type']}, Matcher: {matcher.to_dict()['matcher_type']} ---")
+        print(f"\n{'='*60}")
+        print(f"DESCRIPTOR MAKER {desc_idx}: {descriptor_maker.descriptor_computer.to_dict()['type']}")
+        print(f"{'='*60}")
 
-        # Keypoint descriptor logic (Steps 1, 2, 3)
-        start_time_total = time.time()
-
+        # COMPUTE DESCRIPTORS ONCE for this descriptor maker
+        print("Computing descriptors for entire database...")
         database.reset_descriptors_distances_and_scores()
         database.compute_keypoints_and_descriptors(descriptor_maker)
-        
-        results_top_5 = []
-        for query in queries:
-            query_image_results = []
-            for img, mask in zip(query['images'], query['masks']):
-                query_keypoints, query_descriptors = descriptor_maker.detect_and_compute(img, mask)
-                
-                result = database.query(img, query_keypoints, query_descriptors, scorer, k=10)
-                
-                top_5_ids = [res.id for res in result[:5]]
-                while len(top_5_ids) < 5: top_5_ids.append(-1)
-                query_image_results.append(top_5_ids)
-            results_top_5.append(query_image_results)
-        
-        total_time = time.time() - start_time_total
-        print(f"  Total processing time for iteration: {total_time:.2f}s")
 
-        # Reconciliation block to handle detection mismatches robustly
-        reconciled_results = []
-        no_result_placeholder = [-1] * 5
-        for idx, gt_item in enumerate(ground_truth):
-            res_item = results_top_5[idx]
-            len_gt, len_res = len(gt_item), len(res_item)
-            if len_gt == len_res:
-                reconciled_results.append(res_item)
-            elif len_res < len_gt:
-                reconciled_results.append(res_item + [no_result_placeholder] * (len_gt - len_res))
-            else:
-                reconciled_results.append(res_item[:len_gt])
+        # INNER LOOP: Iterate over scorer configurations
+        for scorer_idx, scorer_config in enumerate(scorer_grid_search(descriptor_maker)):
 
-        # --- CORRECT EVALUATION ---
-        # 1. Prepare the data using your trusted flattening function.
-        # 2. Call mapk with the correct argument order.
-        map_gt, map_top_5 = prepare_gt_and_results_for_mapk(ground_truth, reconciled_results)
+            # Check if we should skip this iteration based on command line args
+            if iteration < args.from_iter or (iteration - args.from_iter) % args.every != 0:
+                iteration += 1
+                continue
 
-        map5 = mapk(map_gt, map_top_5, k=5)
-        map1 = mapk(map_gt, map_top_5, k=1)
-        
-        print(f"  --> Results: map@k1={map1:.4f}, map@k5={map5:.4f}")
+            matcher = scorer_config['matcher']
+            scorer = scorer_config['scorer']
 
-        # Save results
-        results_data = {
-            'params': {
-                'keypoint_and_descriptor:maker': descriptor_maker.to_dict(),
-                'matcher': matcher.to_dict(),
-                'scorer': scorer.to_dict()
-            },
-            'metrics': {'map@k1': map1, 'map@k5': map5},
-            'timing': {'total': total_time}
-        }
-        save_results_for_config(args.results_folder, i, results_data)
+            print(f"\n--- Iteration {iteration:05d} (Desc {desc_idx}, Scorer {scorer_idx}): "
+                  f"ratio={matcher.ratio_test_threshold:.2f}, "
+                  f"ransac={scorer.ransac_thresh:.1f}, min_pts={scorer.min_points} ---")
+
+            # Query and evaluate WITHOUT recomputing descriptors
+            start_time_total = time.time()
+
+            results_top_5 = []
+            for query in queries:
+                query_image_results = []
+                for img, mask in zip(query['images'], query['masks']):
+                    query_keypoints, query_descriptors = descriptor_maker.detect_and_compute(img, mask)
+
+                    result = database.query(img, query_keypoints, query_descriptors, scorer, k=10)
+
+                    top_5_ids = [res.id for res in result[:5]]
+                    while len(top_5_ids) < 5: top_5_ids.append(-1)
+                    query_image_results.append(top_5_ids)
+                results_top_5.append(query_image_results)
+
+            total_time = time.time() - start_time_total
+            print(f"  Query processing time: {total_time:.2f}s")
+
+            # Reconciliation block to handle detection mismatches robustly
+            reconciled_results = []
+            no_result_placeholder = [-1] * 5
+            for idx, gt_item in enumerate(ground_truth):
+                res_item = results_top_5[idx]
+                len_gt, len_res = len(gt_item), len(res_item)
+                if len_gt == len_res:
+                    reconciled_results.append(res_item)
+                elif len_res < len_gt:
+                    reconciled_results.append(res_item + [no_result_placeholder] * (len_gt - len_res))
+                else:
+                    reconciled_results.append(res_item[:len_gt])
+
+            # --- CORRECT EVALUATION ---
+            # 1. Prepare the data using your trusted flattening function.
+            # 2. Call mapk with the correct argument order.
+            map_gt, map_top_5 = prepare_gt_and_results_for_mapk(ground_truth, reconciled_results)
+
+            map5 = mapk(map_gt, map_top_5, k=5)
+            map1 = mapk(map_gt, map_top_5, k=1)
+
+            print(f"  --> Results: map@k1={map1:.4f}, map@k5={map5:.4f}")
+
+            # Save results
+            results_data = {
+                'params': {
+                    'keypoint_and_descriptor_maker': descriptor_maker.to_dict(),
+                    'matcher': matcher.to_dict(),
+                    'scorer': scorer.to_dict()
+                },
+                'metrics': {'map@k1': map1, 'map@k5': map5},
+                'timing': {'query_time': total_time},
+                'indices': {'desc_idx': desc_idx, 'scorer_idx': scorer_idx, 'iteration': iteration}
+            }
+            save_results_for_config(args.results_folder, iteration, results_data)
+
+            iteration += 1
+
+        print(f"\nCompleted all {scorer_idx + 1} scorer configs for descriptor maker {desc_idx}")
+
+    print(f"\n{'='*60}")
+    print(f"GRID SEARCH COMPLETE")
+    print(f"Total iterations processed: {iteration}")
+    print(f"{'='*60}")
 
 if __name__ == "__main__":
     main()

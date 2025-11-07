@@ -14,6 +14,12 @@ from cv2 import xfeatures2d
 from libs_week3.color_conversion import ColorConversion, ColorSpace
 from libs_week3.preprocessing import ImagePreprocessStep
 
+
+class DescriptorValueType(enum.Enum):
+    """Enum to distinguish between float and binary descriptors for proper matching."""
+    FLOAT = "float"
+    BINARY = "binary"
+
 def flatten_list(l):
     res = []
 
@@ -106,16 +112,21 @@ def get_colorspace_ranges(color_space: 'ColorSpace') -> list[tuple[float, float]
 
 class DescriptorComputer(abc.ABC):
     #keypoint descriptor class
-    
+
     @abc.abstractmethod
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
-        
+
         #Detect keypoints and compute descriptors.
         #Returns: keypoints: List of cv2.KeyPoint objects, descriptors: Array of shape (n_keypoints, descriptor_dim)
         pass
-    
+
     @abc.abstractmethod
     def to_dict(self) -> dict[str, Any]:
+        pass
+
+    @abc.abstractmethod
+    def get_value_type(self) -> DescriptorValueType:
+        """Returns whether this descriptor produces float or binary values."""
         pass
 
 
@@ -160,6 +171,9 @@ class ORBDescriptor(DescriptorComputer):
             "patch_size": self.patch_size
         }
 
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.BINARY
+
 class DaisyDescriptor(DescriptorComputer):
     def __init__(self, step: int = 4, radius: int = 15, rings: int = 3, histograms: int = 8, orientations: int = 8):
         self.step = step
@@ -202,7 +216,10 @@ class DaisyDescriptor(DescriptorComputer):
             "histograms": self.histograms,
             "orientations": self.orientations
         }
-        
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
 class SIFTDescriptor(DescriptorComputer):
     def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6):
         self.n_features = n_features
@@ -211,16 +228,16 @@ class SIFTDescriptor(DescriptorComputer):
         self.edge_threshold = edge_threshold
         self.sigma = sigma
         self.sift = cv2.SIFT_create(nfeatures=n_features, nOctaveLayers=n_octave_layers, contrastThreshold=contrast_threshold, edgeThreshold=edge_threshold, sigma=sigma)
-        
+
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
             gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
-        
+
         keypoints, descriptors = self.sift.detectAndCompute(gray, mask)
         return keypoints, descriptors
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "type": "SIFT",
@@ -230,6 +247,9 @@ class SIFTDescriptor(DescriptorComputer):
             "edge_threshold": self.edge_threshold,
             "sigma": self.sigma
         }
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
 
 class RootSIFTDescriptor(DescriptorComputer):
     def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6):
@@ -269,22 +289,25 @@ class RootSIFTDescriptor(DescriptorComputer):
             "sigma": self.sigma
         }
 
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
 class BRISKDescriptor(DescriptorComputer):
     def __init__(self, thresh: int = 30, octaves: int = 3, pattern_scale: float = 1.0):
         self.thresh = thresh
         self.octaves = octaves
         self.pattern_scale = pattern_scale
         self.brisk = cv2.BRISK_create(thresh=thresh, octaves=octaves, patternScale=pattern_scale)
-        
+
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
             gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
-        
+
         keypoints, descriptors = self.brisk.detectAndCompute(gray, mask)
         return keypoints, descriptors
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "type": "BRISK",
@@ -292,8 +315,11 @@ class BRISKDescriptor(DescriptorComputer):
             "octaves": self.octaves,
             "pattern_scale": self.pattern_scale
         }
-    
-    
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.BINARY
+
+
 class KAZEDescriptor(DescriptorComputer):
     def __init__(self, extended: bool = False, upright: bool = False,
                  threshold: float = 0.001, n_octaves: int = 4,
@@ -333,6 +359,9 @@ class KAZEDescriptor(DescriptorComputer):
             "n_octave_layers": self.n_octave_layers,
             "diffusivity": self.diffusivity
         }
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
 
 class AKAZEDescriptor(DescriptorComputer):
     def __init__(self, descriptor_type: int = cv2.AKAZE_DESCRIPTOR_MLDB, 
@@ -381,6 +410,9 @@ class AKAZEDescriptor(DescriptorComputer):
             "diffusivity": self.diffusivity
         }
 
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.BINARY
+
 class SURFDescriptor(DescriptorComputer):
     """
     Note: SURF is part of the opencv-contrib-python package. 
@@ -419,7 +451,10 @@ class SURFDescriptor(DescriptorComputer):
             "extended": self.extended,
             "upright": self.upright
         }
-        
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
 
 class PCASIFTDescriptor(DescriptorComputer):
     def __init__(self, 
@@ -507,7 +542,10 @@ class PCASIFTDescriptor(DescriptorComputer):
             "sigma": self.sigma,
             "num_components": self.num_components
         }
-    
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
+
 
 class HOGDescriptor(DescriptorComputer):
     """
@@ -607,7 +645,7 @@ class HOGDescriptor(DescriptorComputer):
             "block_stride": self.block_stride,
             "cell_size": self.cell_size,
             "nbins": self.nbins,
-            
+
             # SIFT detector params
             "detector_type": "SIFT",
             "n_features": self.n_features,
@@ -616,6 +654,9 @@ class HOGDescriptor(DescriptorComputer):
             "edge_threshold": self.edge_threshold,
             "sigma": self.sigma
         }
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
 
 class GLOHDescriptor(DescriptorComputer):
     """
@@ -734,7 +775,7 @@ class GLOHDescriptor(DescriptorComputer):
         return {
             "type": "ArticleGLOH (Custom)",
             "nbins": self.nbins,
-            
+
             # SIFT detector params
             "detector_type": "SIFT",
             "n_features": self.n_features,
@@ -743,6 +784,9 @@ class GLOHDescriptor(DescriptorComputer):
             "edge_threshold": self.edge_threshold,
             "sigma": self.sigma
         }
+
+    def get_value_type(self) -> DescriptorValueType:
+        return DescriptorValueType.FLOAT
 
 class DescriptorMatcher:
     
