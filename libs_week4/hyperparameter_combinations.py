@@ -242,11 +242,12 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     for config in generate_rootsift_configs():
         yield RootSIFTDescriptor(**config)
 
-    # PCA-SIFT: Exploratory - now with proper database-wide PCA fitting
-    for config in generate_pcasift_configs():
-        yield PCASIFTDescriptor(**config)
-
     # === DISCARDED DESCRIPTORS (from ranking analysis) ===
+
+    # PCA-SIFT: Consistently poor performance (mAP@k1 ~0.51-0.72, bottom 20%)
+    # Slow fitting + poor results make it not worth exploring
+    # for config in generate_pcasift_configs():
+    #     yield PCASIFTDescriptor(**config)
 
     # SIFT: Consistently worse than RootSIFT (0.59-0.64 vs 0.69-0.77)
     # for config in generate_sift_configs():
@@ -399,11 +400,16 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker, include_alt
     """
     Generator for scorer configurations for a given descriptor maker.
 
-    OPTIMIZED BASED ON RANKING RESULTS:
-    - ratio_threshold=0.7 appears in 8 of top 10 results (DOMINANT)
-    - ransac_thresh=3.0 is the clear winner for tight matching
-    - use_reproj_error_penalty=False simplifies scoring without losing accuracy
-    - min_points=20 is standard, test 15 and 25 as well
+    OPTIMIZED BASED ON LATEST RANKING RESULTS (94.8% mAP@k1):
+    - ratio_threshold=0.65 is clearly superior to 0.7 (top results all use 0.65)
+    - ransac_thresh=3.0 is optimal (5.0, 8.0 perform worse)
+    - max_reproj_error=3.0 is optimal (5.0, 8.0 perform worse)
+    - reproj_error_penalty_weight=0.1 works best when enabled (0.5 too harsh)
+    - min_points: [15, 20, 25] all viable, explore tradeoff
+    - use_reproj_error_penalty: Both True/False viable, depends on scenario
+
+    NOTE: 2 textureless images have kpts_min=0 (no keypoints detected).
+    Modifying scorer parameters CANNOT help these cases - they need keypoints first.
 
     Args:
         descriptor_maker: The KeypointAndDescriptorMaker to generate scorers for
@@ -426,20 +432,88 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker, include_alt
     else:  # BINARY
         norm_type = cv2.NORM_HAMMING
 
-    # OPTIMIZED GRID (9 configs): Focus on what works + explore gentle penalties
-    # Based on ranking: ratio=0.7 + ransac=3.0 is the winning formula
-    # NEW: Testing gentle reproj_error penalties to handle scale differences
+    # OPTIMIZED GRID (12 configs): Focus on proven winners from latest ranking
+    # Based on ranking: ratio=0.65 + ransac=3.0 + max_reproj=3.0 is optimal
+    # Explore penalty weights (0.1, 0.2) and min_points (15, 20, 25)
     scorer_configs = [
-        # Config 1: THE WINNER from previous experiments - no penalty
+        # === BEST CONFIGURATIONS (ratio=0.65, proven winner) ===
+
+        # Config 1: Top performer - ratio=0.65, no penalty
+        {
+            'ratio_threshold': 0.65,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': False,
+            'reproj_error_penalty_weight': 0.1,  # Ignored when penalty=False
+            'min_points': 20
+        },
+        # Config 2: Gentle penalty (10% weight) - also top tier
+        {
+            'ratio_threshold': 0.65,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': True,
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 20
+        },
+        # Config 3: Moderate penalty (20% weight) - explore if better than 0.1
+        {
+            'ratio_threshold': 0.65,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': True,
+            'reproj_error_penalty_weight': 0.2,
+            'min_points': 20
+        },
+        # Config 4: Lower min_points (easier matching for challenging cases)
+        {
+            'ratio_threshold': 0.65,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': False,
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 15
+        },
+        # Config 5: Higher min_points (stricter matching)
+        {
+            'ratio_threshold': 0.65,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': False,
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 25
+        },
+        # Config 6: Gentle penalty + lower min_points
+        {
+            'ratio_threshold': 0.65,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': True,
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 15
+        },
+        # Config 7: Gentle penalty + higher min_points
+        {
+            'ratio_threshold': 0.65,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': True,
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 25
+        },
+
+        # === SECONDARY CONFIGURATIONS (ratio=0.7, backup option) ===
+
+        # Config 8: ratio=0.7, no penalty
         {
             'ratio_threshold': 0.7,
             'ransac_thresh': 3.0,
             'max_reproj_error': 3.0,
             'use_reproj_error_penalty': False,
-            'reproj_error_penalty_weight': 0.5,  # Ignored when penalty=False
+            'reproj_error_penalty_weight': 0.1,
             'min_points': 20
         },
-        # Config 2: Gentle penalty (10% weight) - hypothesis: scale differences need gentler penalty
+        # Config 9: ratio=0.7, gentle penalty
         {
             'ratio_threshold': 0.7,
             'ransac_thresh': 3.0,
@@ -448,7 +522,25 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker, include_alt
             'reproj_error_penalty_weight': 0.1,
             'min_points': 20
         },
-        # Config 3: Moderate penalty (20% weight)
+        # Config 10: ratio=0.7, lower min_points
+        {
+            'ratio_threshold': 0.7,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': False,
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 15
+        },
+        # Config 11: ratio=0.7, higher min_points
+        {
+            'ratio_threshold': 0.7,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': False,
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 25
+        },
+        # Config 12: ratio=0.7, moderate penalty
         {
             'ratio_threshold': 0.7,
             'ransac_thresh': 3.0,
@@ -457,65 +549,13 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker, include_alt
             'reproj_error_penalty_weight': 0.2,
             'min_points': 20
         },
-        # Config 4: Even tighter ratio - explore if we can do better
-        {
-            'ratio_threshold': 0.65,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': False,
-            'reproj_error_penalty_weight': 0.5,
-            'min_points': 20
-        },
-        # Config 5: Slightly looser ratio - safety net
-        {
-            'ratio_threshold': 0.75,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': False,
-            'reproj_error_penalty_weight': 0.5,
-            'min_points': 20
-        },
-        # Config 6: Different min_points (fewer for challenging cases)
-        {
-            'ratio_threshold': 0.7,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': False,
-            'reproj_error_penalty_weight': 0.5,
-            'min_points': 15
-        },
-        # Config 7: Different min_points (more for stricter matching)
-        {
-            'ratio_threshold': 0.7,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': False,
-            'reproj_error_penalty_weight': 0.5,
-            'min_points': 25
-        },
-        # Config 8: Gentle penalty + tighter ratio
-        {
-            'ratio_threshold': 0.65,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': True,
-            'reproj_error_penalty_weight': 0.1,
-            'min_points': 20
-        },
-        # Config 9: Gentle penalty + looser ratio
-        {
-            'ratio_threshold': 0.75,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': True,
-            'reproj_error_penalty_weight': 0.1,
-            'min_points': 20
-        },
     ]
 
     # === DISCARDED SCORER CONFIGS (from ranking analysis) ===
-    # - ratio=0.8: Consistently worse than 0.7
-    # - ransac=5.0, 8.0: Too loose, worse precision
+    # - ratio=0.75, 0.8: Consistently worse than 0.65
+    # - ransac=5.0, 8.0: Too loose, worse precision (removed)
+    # - max_reproj_error=5.0, 8.0: Too loose, worse precision (removed)
+    # - reproj_error_penalty_weight=0.5: Too harsh, degrades performance (removed)
     # - Strong reproj_error_penalty (weight=0.5): Previous experiments showed it hurts performance
     #   → Now testing gentle penalties (0.1, 0.2) to handle scale differences
     # - Lenient configs in general perform poorly
