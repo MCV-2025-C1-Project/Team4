@@ -42,7 +42,24 @@ def generate_orb_configs() -> Iterator[Dict[str, Any]]:
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
         yield dict(zip(keys, v))
-        
+
+
+def generate_orb_configs_reduced() -> Iterator[Dict[str, Any]]:
+    # REDUCED GRID (2 configs): Best performers only for faster experimentation
+    # Based on ranking: n_features=3000 + scale_factor=1.2 is top performer
+    param_grid = {
+        'n_features': [2500, 3000],  # Best two from ranking
+        'scale_factor': [1.2],  # 1.2 slightly better than 1.5
+        'n_levels': [10],
+        'wta_k': [2],
+        'score_type': [cv2.ORB_HARRIS_SCORE],
+        'patch_size': [31]
+    }
+    # Total: 2 configs
+    keys, values = zip(*param_grid.items())
+    for v in itertools.product(*values):
+        yield dict(zip(keys, v))
+
 
 def generate_surf_configs() -> Iterator[Dict[str, Any]]:
     param_grid = {
@@ -93,6 +110,34 @@ def generate_rootsift_configs() -> Iterator[Dict[str, Any]]:
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
         yield dict(zip(keys, v))
+
+
+def generate_rootsift_configs_reduced() -> Iterator[Dict[str, Any]]:
+    # REDUCED GRID (3 configs): Best performers only for faster experimentation
+    # Based on ranking: contrast_threshold=0.03, n_features=2000, sigma=1.6 or 2.0 are top
+    param_grid = {
+        'n_features': [2000],  # Best performer from ranking
+        'n_octave_layers': [4],
+        'contrast_threshold': [0.03],  # 0.03 better than 0.04
+        'sigma': [1.6, 2.0],  # Both good, keep variation
+        'edge_threshold': [15]
+    }
+    # Total: 1 × 1 × 2 = 2 configs (minimal but covers best params)
+    # Add one more with n_features=1500 for robustness
+    keys, values = zip(*param_grid.items())
+    for v in itertools.product(*values):
+        yield dict(zip(keys, v))
+
+    # Add one extra config with slightly more features
+    yield {
+        'n_features': 1500,
+        'n_octave_layers': 4,
+        'contrast_threshold': 0.03,
+        'sigma': 2.0,
+        'edge_threshold': 15
+    }
+    # Total: 3 configs
+
 
 def generate_brisk_configs() -> Iterator[Dict[str, Any]]:
     # ORIGINAL FULL GRID (3 configs):
@@ -236,7 +281,7 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     Total: 22 descriptor configs (down from 104)
     """
     finders = {
-            'SIFT': SIFTFinder(n_features=2000),  # Limit features to avoid memory issues
+            # 'SIFT': SIFTFinder(n_features=2000),  # Limit features to avoid memory issues
             'Harris': HarrisFinder(thresh=0.01),
             'HarrisLaplacian': HarrisLaplacianFinder(scales=[1.0, 1.6, 2.0, 2.8], harris_thresh=0.01)
     }
@@ -244,17 +289,17 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     # Test each finder and descriptor combination
     for finder_name, finder in finders.items():
         # ORB: Best performer - fast and accurate
-        for config in generate_orb_configs():
+        for config in generate_orb_configs_reduced():
             if finder_name == 'SIFT': continue
             yield CombinedDescriptor(descriptor=ORBDescriptor(**config), finder=finder)
 
         # RootSIFT: Strong alternative to ORB
-        for config in generate_rootsift_configs():
+        for config in generate_rootsift_configs_reduced():
             yield CombinedDescriptor(descriptor=RootSIFTDescriptor(**config), finder=finder)
 
         # PCA-SIFT: Exploratory - now with proper database-wide PCA fitting
-        for config in generate_pcasift_configs():
-            yield CombinedDescriptor(descriptor=PCASIFTDescriptor(**config), finder=finder)
+        # for config in generate_pcasift_configs():
+            # yield CombinedDescriptor(descriptor=PCASIFTDescriptor(**config), finder=finder)
 
     # === DISCARDED DESCRIPTORS (from ranking analysis) ===
 
@@ -337,6 +382,33 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     #     yield GLOHDescriptor(**config)
 
 
+def generate_keypoint_descriptors_reduced() -> Iterator[DescriptorComputer]:
+    """
+    REDUCED descriptor grid for faster experimentation with Harris/HarrisLaplacian finders.
+
+    Uses reduced parameter grids to minimize combinations while keeping best performers:
+    - ORB: 2 configs (best from ranking: n_features=2500/3000, scale_factor=1.2)
+    - RootSIFT: 3 configs (best from ranking: contrast_threshold=0.03, n_features=1500/2000)
+    - 2 finders: Harris, HarrisLaplacian
+
+    Total: 2 finders × (2 ORB + 3 RootSIFT) = 10 descriptor makers
+    """
+    finders = {
+        'Harris': HarrisFinder(thresh=0.01),
+        'HarrisLaplacian': HarrisLaplacianFinder(scales=[1.0, 1.6, 2.0, 2.8], harris_thresh=0.01)
+    }
+
+    # Test each finder and descriptor combination
+    for finder_name, finder in finders.items():
+        # ORB: 2 best configs
+        for config in generate_orb_configs_reduced():
+            yield CombinedDescriptor(descriptor=ORBDescriptor(**config), finder=finder)
+
+        # RootSIFT: 3 best configs
+        for config in generate_rootsift_configs_reduced():
+            yield CombinedDescriptor(descriptor=RootSIFTDescriptor(**config), finder=finder)
+
+
 def generate_color_space_combinations() -> list[list[ColorSpace]]:
     return [[ColorSpace.BGR]]
 
@@ -363,6 +435,26 @@ def descriptor_maker_grid_search() -> Iterator[KeypointAndDescriptorMaker]:
                     color_conversion=ColorConversion(targets=color_spaces, normalize=True),
                     preprocess=preprocess
                 )
+
+
+def descriptor_maker_grid_search_reduced() -> Iterator[KeypointAndDescriptorMaker]:
+    """
+    REDUCED descriptor maker grid for faster experimentation.
+
+    Uses generate_keypoint_descriptors_reduced() which yields only 10 descriptor configs
+    instead of 36.
+
+    Total: 10 descriptor makers
+    """
+    for color_spaces in generate_color_space_combinations():
+        for preprocess in generate_preprocess_strategies():
+            for descriptor in generate_keypoint_descriptors_reduced():
+                yield KeypointAndDescriptorMaker(
+                    descriptor_computer=descriptor,
+                    color_conversion=ColorConversion(targets=color_spaces, normalize=True),
+                    preprocess=preprocess
+                )
+
 
 def generate_alternative_scorers(descriptor_maker: KeypointAndDescriptorMaker) -> Iterator[Dict[str, Any]]:
     """
@@ -599,6 +691,82 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker, include_alt
             'matcher': matcher,
             'scorer': scorer
         }
+
+
+def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker, include_alternative_scorers: bool = False) -> Iterator[Dict[str, Any]]:
+    """
+    REDUCED scorer grid for faster experimentation with Harris/HarrisLaplacian finders.
+
+    Based on ranking insights:
+    - ratio=0.65 is clearly superior (all top results use 0.65)
+    - ransac_thresh=3.0 is optimal
+    - min_points=20 is standard
+    - reproj_error_penalty: both True/False viable
+
+    Returns only 3 best configs instead of 9.
+    """
+    descriptor_value_type = descriptor_maker.descriptor_computer.get_value_type()
+
+    if descriptor_value_type == DescriptorValueType.FLOAT:
+        norm_type = cv2.NORM_L2
+    else:  # BINARY
+        norm_type = cv2.NORM_HAMMING
+
+    # REDUCED GRID (3 configs): Top performers only
+    scorer_configs = [
+        # Config 1: Best from ranking - ratio=0.65, no penalty
+        {
+            'ratio_threshold': 0.65,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': False,
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 20
+        },
+        # Config 2: Best with penalty - ratio=0.65, gentle penalty
+        {
+            'ratio_threshold': 0.65,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': True,
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 20
+        },
+        # Config 3: Alternative - ratio=0.7, no penalty (backup)
+        {
+            'ratio_threshold': 0.7,
+            'ransac_thresh': 3.0,
+            'max_reproj_error': 3.0,
+            'use_reproj_error_penalty': False,
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 20
+        },
+    ]
+
+    for config in scorer_configs:
+        ratio_threshold = config['ratio_threshold']
+
+        matcher = DescriptorMatcher(
+            matcher_type='BF',
+            norm_type=norm_type,
+            ratio_test_threshold=ratio_threshold,
+            cross_check=False
+        )
+
+        scorer = HomographyScorer(
+            matcher,
+            ransac_thresh=config['ransac_thresh'],
+            max_reproj_error=config['max_reproj_error'],
+            use_reproj_error_penalty=config['use_reproj_error_penalty'],
+            reproj_error_penalty_weight=config['reproj_error_penalty_weight'],
+            min_points=config['min_points']
+        )
+
+        yield {
+            'matcher': matcher,
+            'scorer': scorer
+        }
+
 
 def generate_homography_scorer_configs() -> Iterator[Dict[str, Any]]:
     """

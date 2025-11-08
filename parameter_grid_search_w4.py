@@ -138,7 +138,7 @@ def main():
         all_results = []
 
         # INNER LOOP: Iterate over scorer configurations
-        for scorer_idx, scorer_config in enumerate(scorer_grid_search(descriptor_maker, include_alternative_scorers=True)):
+        for scorer_idx, scorer_config in enumerate(scorer_grid_search(descriptor_maker, include_alternative_scorers=False)):
 
             matcher = scorer_config['matcher']
             scorer = scorer_config['scorer']
