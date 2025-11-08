@@ -14,7 +14,7 @@ import pickle
 # Week 4 imports - keypoint descriptors
 from libs_week4.database import ImageDatabase
 from libs_week4.descriptor import (
-    ORBDescriptor,
+    RootSIFTDescriptor,
     DescriptorMatcher,
     HomographyScorer,
     KeypointAndDescriptorMaker,
@@ -25,7 +25,7 @@ from libs_week3.preprocessing import Preprocess
 
 # Parse command-line arguments and return them.
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Week 4 Query-by-Sample using ORB keypoint descriptors")
+    parser = argparse.ArgumentParser(description="Week 4 Query-by-Sample using RootSIFT keypoint descriptors")
     parser.add_argument("dataset_path", type=str)  # Dataset directory path.
     parser.add_argument("queries_path", type=str)  # Queries directory path.
 
@@ -258,25 +258,25 @@ def main():
     args = parse_arguments()  # Parse command-line arguments.
 
     print("="*60)
-    print("Week 4 Query-by-Sample: ORB Keypoint Descriptor")
+    print("Week 4 Query-by-Sample: RootSIFT Keypoint Descriptor")
     print("="*60)
 
     print("\nConfiguration:")
-    print("  Descriptor: ORB")
-    print("    - n_features: 3000")
-    print("    - scale_factor: 1.2")
-    print("    - n_levels: 10")
-    print("    - wta_k: 2")
-    print("    - score_type: HARRIS")
-    print("    - patch_size: 31")
+    print("  Descriptor: RootSIFT")
+    print("    - n_features: 2000")
+    print("    - n_octave_layers: 4")
+    print("    - contrast_threshold: 0.03")
+    print("    - edge_threshold: 15")
+    print("    - sigma: 2.0")
     print("  Matcher: BruteForce")
-    print("    - norm_type: HAMMING")
+    print("    - norm_type: L2")
     print("    - cross_check: False")
     print("    - ratio_test_threshold: 0.65")
     print("  Scorer: HomographyScorer")
     print("    - ransac_thresh: 3.0")
     print("    - max_reproj_error: 3.0")
-    print("    - use_reproj_error_penalty: False")
+    print("    - use_reproj_error_penalty: True")
+    print("    - reproj_error_penalty_weight: 0.1")
     print("    - min_points: 20")
     print("\nQuery Processing:")
     print(f"  Multiple paintings detection: {args.multiple_paintings}")
@@ -300,13 +300,12 @@ def main():
 
     # Setup descriptor maker with specified configuration
     print("\nSetting up descriptor maker...")
-    descriptor_computer = ORBDescriptor(
-        n_features=3000,
-        scale_factor=1.2,
-        n_levels=10,
-        wta_k=2,
-        score_type=cv2.ORB_HARRIS_SCORE,
-        patch_size=31
+    descriptor_computer = RootSIFTDescriptor(
+        n_features=2000,
+        n_octave_layers=4,
+        contrast_threshold=0.03,
+        edge_threshold=15,
+        sigma=2.0
     )
 
     descriptor_maker = KeypointAndDescriptorMaker(
@@ -318,7 +317,7 @@ def main():
     # Setup matcher and scorer
     matcher = DescriptorMatcher(
         matcher_type='BF',
-        norm_type=cv2.NORM_HAMMING,
+        norm_type=cv2.NORM_L2,
         cross_check=False,
         ratio_test_threshold=0.65
     )
@@ -327,8 +326,8 @@ def main():
         matcher=matcher,
         ransac_thresh=3.0,
         max_reproj_error=3.0,
-        use_reproj_error_penalty=False,
-        reproj_error_penalty_weight=0.5,
+        use_reproj_error_penalty=True,
+        reproj_error_penalty_weight=0.1,
         min_points=20
     )
 
