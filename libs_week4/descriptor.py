@@ -11,8 +11,8 @@ from skimage.feature import daisy, hog
 from sklearn.decomposition import PCA
 from cv2 import xfeatures2d
 
-# from libs_week3.color_conversion import ColorConversion, ColorSpace
-# from libs_week3.preprocessing import ImagePreprocessStep
+from libs_week3.color_conversion import ColorConversion, ColorSpace
+from libs_week3.preprocessing import ImagePreprocessStep
 
 class ColorSpace(enum.Enum):
     RGB = 'RGB'
@@ -169,8 +169,9 @@ class HarrisFinder(KeypointFinder):
 
 
 class HarrisLaplacianFinder(KeypointFinder):
-    def __init__(self, scales: list[float] = None, harris_kwargs: dict | None = None, laplacian_k: int = 3, harris_thresh: float = 0.01):
+    def __init__(self, n_features: int = 500, scales: list[float] = None, harris_kwargs: dict | None = None, laplacian_k: int = 3, harris_thresh: float = 0.01):
         # scales: gaussian sigma values to search across
+        self.n_features = n_features
         self.scales = scales if scales is not None else [1.0, 1.6, 2.0, 2.8]
         self.harris_kwargs = harris_kwargs or {}
         self.laplacian_k = laplacian_k
@@ -214,7 +215,7 @@ class HarrisLaplacianFinder(KeypointFinder):
         candidates = np.array(candidates, dtype=float)
         laplacian_responses = np.array(laplacian_responses, dtype=float)
         # pick top N by abs(laplacian)
-        N = min(500, len(candidates))
+        N = min(self.n_features, len(candidates))
         idxs = np.argsort(-np.abs(laplacian_responses))[:N]
         keypoints = []
         for i in idxs:
@@ -266,6 +267,41 @@ class DescriptorComputer(abc.ABC):
         """Returns whether this descriptor produces float or binary values."""
         pass
 
+    def needs_fitting(self) -> bool:
+        return False
+
+
+class FittableDescriptorComputer(DescriptorComputer):
+    @abc.abstractmethod
+    def fit(self, images: list[np.ndarray], masks: list[np.ndarray | None] = None):
+        pass
+
+    def needs_fitting(self) -> bool:
+        return True
+
+    @abc.abstractmethod
+    def is_fitted(self) -> bool:
+        pass
+
+class CombinedDescriptor(DescriptorComputer):
+    def __init__(self, finder: KeypointFinder = None , descriptor: DescriptorComputer = None):
+        self.finder = finder
+        self.descriptor = descriptor
+    
+    def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
+        keypoints = self.finder.detect(image, mask)
+        descriptors = self.descriptor.compute(image, keypoints)
+        return keypoints, descriptors
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": f"{self.finder.to_dict()['type']}_{self.descriptor.to_dict()['type']}",
+            "finder": self.finder.to_dict(),
+            **self.descriptor.to_dict()
+        }
+    
+    def get_value_type(self) -> DescriptorValueType:
+        return self.descriptor.get_value_type()
 
 class ORBDescriptor(DescriptorComputer):
     def __init__(self, n_features: int = 500, scale_factor: float = 1.2, n_levels: int = 8,
@@ -415,7 +451,7 @@ class SIFTDescriptor(DescriptorComputer):
 
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
         if len(image.shape) == 3:
-            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
 
@@ -494,7 +530,7 @@ class RootSIFTDescriptor(DescriptorComputer):
         else:
             gray = (image * 255).astype(np.uint8)
 
-        descriptors = self.sift.compute(gray, keypoints)
+        _, descriptors = self.sift.compute(gray, keypoints)
 
         if descriptors is None or len(descriptors) == 0:
             return descriptors
@@ -760,67 +796,114 @@ class SURFDescriptor(DescriptorComputer):
     def get_value_type(self) -> DescriptorValueType:
         return DescriptorValueType.FLOAT
 
-class PCASIFTDescriptor(DescriptorComputer):
-    def __init__(self, 
-                num_components: int = 128, # A more common value than 128
-                n_features: int = 0, 
-                n_octave_layers: int = 3, 
-                contrast_threshold: float = 0.04, 
-                edge_threshold: float = 10, 
-                sigma: float = 1.6,
-                finder: KeypointFinder = None):
-        self.finder = finder
-        
+
+class PCASIFTDescriptor(FittableDescriptorComputer):
+    def __init__(self,
+                 num_components: int = 128, # A more common value than 128
+                 n_features: int = 0,
+                 n_octave_layers: int = 3,
+                 contrast_threshold: float = 0.04,
+                 edge_threshold: float = 10,
+                 sigma: float = 1.6):
+
         # SIFT parameters
         self.n_features = n_features
         self.n_octave_layers = n_octave_layers
         self.contrast_threshold = contrast_threshold
         self.edge_threshold = edge_threshold
         self.sigma = sigma
-        
+
         # PCA parameters
         self.num_components = num_components
-        
+
         # Create SIFT object
         # Handle different OpenCV versions (contrib vs. main)
         try:
-            self.sift = cv2.SIFT_create(nfeatures=n_features, 
-                                        nOctaveLayers=n_octave_layers, 
-                                        contrastThreshold=contrast_threshold, 
-                                        edgeThreshold=edge_threshold, 
+            self.sift = cv2.SIFT_create(nfeatures=n_features,
+                                        nOctaveLayers=n_octave_layers,
+                                        contrastThreshold=contrast_threshold,
+                                        edgeThreshold=edge_threshold,
                                         sigma=sigma)
         except AttributeError:
-            self.sift = cv2.xfeatures2d.SIFT_create(nfeatures=n_features, 
-                                                   nOctaveLayers=n_octave_layers, 
-                                                   contrastThreshold=contrast_threshold, 
-                                                   edgeThreshold=edge_threshold, 
+            self.sift = cv2.xfeatures2d.SIFT_create(nfeatures=n_features,
+                                                   nOctaveLayers=n_octave_layers,
+                                                   contrastThreshold=contrast_threshold,
+                                                   edgeThreshold=edge_threshold,
                                                    sigma=sigma)
-        
 
+        # PCA will be fitted on the database
+        self.pca = None
+        self._is_fitted = False
+
+    def fit(self, images: list[np.ndarray], masks: list[np.ndarray | None] = None):
+        """
+        Fit PCA on SIFT descriptors from all database images.
+
+        Args:
+            images: List of database images
+            masks: Optional list of masks for each image
+        """
+        if masks is None:
+            masks = [None] * len(images)
+
+        # Collect all SIFT descriptors from all images
+        all_descriptors = []
+
+        for image, mask in zip(images, masks):
+            if len(image.shape) == 3:
+                gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+            else:
+                gray = (image * 255).astype(np.uint8)
+
+            _, descriptors = self.sift.detectAndCompute(gray, mask)
+
+            if descriptors is not None and len(descriptors) > 0:
+                all_descriptors.append(descriptors)
+
+        if not all_descriptors:
+            raise ValueError("No SIFT descriptors found in database images. Cannot fit PCA.")
+
+        # Concatenate all descriptors
+        all_descriptors_array = np.vstack(all_descriptors)
+
+        # Check if we have enough samples
+        if all_descriptors_array.shape[0] < self.num_components:
+            raise ValueError(
+                f"Not enough descriptors ({all_descriptors_array.shape[0]}) "
+                f"to fit PCA with {self.num_components} components. "
+                f"Reduce num_components or use more images."
+            )
+
+        # Fit PCA on all descriptors
         self.pca = PCA(n_components=self.num_components)
-        
+        self.pca.fit(all_descriptors_array)
+        self._is_fitted = True
+
+    def is_fitted(self) -> bool:
+        """Returns whether PCA has been fitted."""
+        return self._is_fitted
+
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
-        
+
+        if not self.is_fitted():
+            raise RuntimeError(
+                "PCASIFTDescriptor must be fitted on database images before use. "
+                "Call fit() with database images first."
+            )
+
         if len(image.shape) == 3:
             gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
-        
+
         # 1. Detect keypoints and compute SIFT descriptors
         keypoints, descriptors = self.sift.detectAndCompute(gray, mask)
-        
+
         if descriptors is None or len(descriptors) == 0:
             return keypoints, np.array([])
 
-        try:
-            pca_descriptors = self.pca.fit_transform(descriptors)
-        except ValueError as e:
-            # This can happen if n_features < num_components
-            print(f"PCA Error: {e}. Returning empty descriptors.")
-            print("This often happens if the number of detected keypoints "
-                  f"({len(descriptors)}) is less than num_components ({self.num_components}).")
-            return keypoints, np.array([])
-
+        # 2. Transform using the fitted PCA (not fit_transform!)
+        pca_descriptors = self.pca.transform(descriptors)
 
         # 3. Normalize the PCA-SIFT descriptors
         normalized_pca_descriptors = cv2.normalize(pca_descriptors, None)
@@ -835,7 +918,7 @@ class PCASIFTDescriptor(DescriptorComputer):
         norms = np.linalg.norm(root_sift_descriptors, axis=1, keepdims=True)
         norms[norms == 0] = 1.0 # Avoid division by zero
         final_descriptors = root_sift_descriptors / norms
-        
+
         return keypoints, final_descriptors
     
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
@@ -844,58 +927,53 @@ class PCASIFTDescriptor(DescriptorComputer):
         else:
             gray = (image * 255).astype(np.uint8)
         keypoints = self.finder.detect(gray, mask)
-        return keypoints  
+        return keypoints
     
-    def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint]) -> tuple[list, np.ndarray]:
-        
+    def compute(self, image: np.ndarray, keypoints: list[cv2.KeyPoint]) -> np.ndarray:
+        if not self.is_fitted():
+            raise RuntimeError(
+                "PCASIFTDescriptor must be fitted on database images before use. "
+                "Call fit() with database images first."
+            )
+
         if len(image.shape) == 3:
             gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
         else:
             gray = (image * 255).astype(np.uint8)
-        
-        # 1. Detect keypoints and compute SIFT descriptors
-        keypoints, descriptors = self.sift.compute(gray, keypoints)
-        
+
+        # 1. Compute SIFT descriptors
+        _, descriptors = self.sift.compute(gray, keypoints)
+
         if descriptors is None or len(descriptors) == 0:
-            return keypoints
+            return np.array([])
 
-        try:
-            pca_descriptors = self.pca.fit_transform(descriptors)
-        except ValueError as e:
-            # This can happen if n_features < num_components
-            print(f"PCA Error: {e}. Returning empty descriptors.")
-            print("This often happens if the number of detected keypoints "
-                  f"({len(descriptors)}) is less than num_components ({self.num_components}).")
-            return keypoints
-
+        # 2. Transform using the fitted PCA
+        pca_descriptors = self.pca.transform(descriptors)
 
         # 3. Normalize the PCA-SIFT descriptors
         normalized_pca_descriptors = cv2.normalize(pca_descriptors, None)
 
         # 4. Compute RootSIFT descriptors
-        #    We clip at 0 to avoid errors with tiny negative numbers
         normalized_pca_descriptors = np.maximum(normalized_pca_descriptors, 0)
         root_sift_descriptors = np.sqrt(normalized_pca_descriptors)
 
         # 5. Perform L2 normalization on RootSIFT descriptors
-        #    Handle potential divide-by-zero if a descriptor vector is all zeros
         norms = np.linalg.norm(root_sift_descriptors, axis=1, keepdims=True)
         norms[norms == 0] = 1.0 # Avoid division by zero
         final_descriptors = root_sift_descriptors / norms
-        
-        return keypoints, final_descriptors
-    
-    
+
+        return final_descriptors
     
     def to_dict(self) -> dict[str, Any]:
         return {
-            "type": "PCA-SIFT-Root (Flawed)",
+            "type": "PCA-SIFT-Root",
             "n_features": self.n_features,
             "n_octave_layers": self.n_octave_layers,
             "contrast_threshold": self.contrast_threshold,
             "edge_threshold": self.edge_threshold,
             "sigma": self.sigma,
-            "num_components": self.num_components
+            "num_components": self.num_components,
+            "is_fitted": self.is_fitted()
         }
 
     def get_value_type(self) -> DescriptorValueType:
@@ -944,25 +1022,26 @@ class HOGDescriptor(DescriptorComputer):
         else:
             gray = (image * 255).astype(np.uint8)
         
-        locations = self.hog.detect(gray)
-                
-        locations = [(round(kp.pt[0]), round(kp.pt[1])) for kp in locations]
+        keypoints = self.sift_detector.detect(gray, mask)
+        
+        if not keypoints:
+            return [], np.array([])
+        
+        locations = [(round(kp.pt[0]), round(kp.pt[1])) for kp in keypoints]
         
 
         descriptors = self.hog.compute(gray, locations=locations)
         
-        n_cells = (image.shape[0] // self.cell_size[0], image.shape[1] // self.cell_size[1])
-        
-        descriptors = descriptors.reshape(
-            n_cells[1] - self.win_size[1] + 1,
-            n_cells[0] - self.win_size[0] + 1,
-            self.win_size[1] - self.block_size[1] + 1,
-            self.win_size[0] - self.block_size[0] + 1,
-            self.block_size[1],
-            self.block_size[0],
-            self.nbins)
-        return locations, descriptors
-    
+        if descriptors is None:
+            return keypoints, np.array([])
+            
+
+        descriptors = descriptors.reshape((len(locations), self.hog.getDescriptorSize()))
+        descriptors = cv2.normalize(descriptors, None, norm_type=cv2.NORM_L2)
+
+        return keypoints, descriptors
+
+
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
             gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
@@ -1312,12 +1391,14 @@ class HomographyScorer(Scorer):
                  ransac_thresh: float = 5.0,
                  max_reproj_error: float = 5.0,
                  use_reproj_error_penalty: bool = True,
+                 reproj_error_penalty_weight: float = 0.5,
                  min_points: int = 20):
 
         super().__init__(matcher)
         self.ransac_thresh = ransac_thresh
         self.max_reproj_error = max_reproj_error
         self.use_reproj_error_penalty = use_reproj_error_penalty
+        self.reproj_error_penalty_weight = reproj_error_penalty_weight
         self.min_points = min_points
 
     def score(self, query_image: np.ndarray, query_keypoints, query_descriptors, database_image: np.ndarray, database_keypoints, database_descriptors):
@@ -1350,7 +1431,7 @@ class HomographyScorer(Scorer):
         reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
 
         det = np.linalg.det(M[:2, :2])
-        if det <= 0.4 or det > 10:  # Negative det is a flip, det too large/small is bad
+        if det <= 0.4 or det > 9999:  # Negative det is a flip, det too large/small is bad
             valid = False
         elif reproj_error > self.max_reproj_error:
             valid = False
@@ -1359,7 +1440,10 @@ class HomographyScorer(Scorer):
 
         # Calculate score based on configuration
         if self.use_reproj_error_penalty:
-            score = inlier_ratio * np.exp(-0.5 * (reproj_error / self.max_reproj_error))
+            # Use tunable penalty weight instead of fixed 0.5
+            # Lower weight (e.g., 0.1) = gentler penalty, better for scale differences
+            # Higher weight (e.g., 0.5) = stronger penalty, stricter matching
+            score = inlier_ratio * np.exp(-self.reproj_error_penalty_weight * (reproj_error / self.max_reproj_error))
         else:
             score = inlier_ratio
 
@@ -1369,7 +1453,8 @@ class HomographyScorer(Scorer):
             "inlier_ratio": float(inlier_ratio),
             "reproj_error": float(reproj_error),
             "det": float(det),
-            "use_reproj_error_penalty": self.use_reproj_error_penalty
+            "use_reproj_error_penalty": self.use_reproj_error_penalty,
+            "reproj_error_penalty_weight": self.reproj_error_penalty_weight if self.use_reproj_error_penalty else None
         }
 
         return valid, float(score), info
@@ -1379,7 +1464,336 @@ class HomographyScorer(Scorer):
         d['ransac_thresh'] = self.ransac_thresh
         d['max_reproj_error'] = self.max_reproj_error
         d['use_reproj_error_penalty'] = self.use_reproj_error_penalty
+        d['reproj_error_penalty_weight'] = self.reproj_error_penalty_weight
         d['min_points'] = self.min_points
+        return d
+
+
+class MatchRatioScorer(Scorer):
+    """
+    Simple baseline scorer that uses match ratio without geometric verification.
+    Score = num_good_matches / num_query_keypoints
+
+    WARNING: This will favor database images with many keypoints.
+    Use as a baseline to verify that geometric verification adds value.
+    """
+    def __init__(self, matcher: DescriptorMatcher, min_matches: int = 10):
+        super().__init__(matcher)
+        self.min_matches = min_matches
+
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors,
+              database_image: np.ndarray, database_keypoints, database_descriptors):
+
+        if query_descriptors is None or database_descriptors is None:
+            return False, 0.0, {"reason": "no_descriptors"}
+
+        if len(query_descriptors) == 0 or len(database_descriptors) == 0:
+            return False, 0.0, {"reason": "no_descriptors"}
+
+        # Get good matches using ratio test
+        good_matches = self.matcher.match(query_descriptors, database_descriptors)
+
+        if len(good_matches) < self.min_matches:
+            return False, 0.0, {"reason": "not_enough_matches"}
+
+        # Simple ratio: matches / query keypoints
+        match_ratio = len(good_matches) / len(query_keypoints)
+
+        info = {
+            "num_matches": len(good_matches),
+            "num_query_keypoints": len(query_keypoints),
+            "num_database_keypoints": len(database_keypoints),
+            "match_ratio": float(match_ratio)
+        }
+
+        return True, float(match_ratio), info
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d['min_matches'] = self.min_matches
+        return d
+
+
+class SymmetricMatchRatioScorer(Scorer):
+    """
+    Normalized match ratio scorer that accounts for both query and database keypoint counts.
+    Score = num_good_matches / sqrt(num_query_keypoints * num_database_keypoints)
+
+    This is the symmetric normalization suggested in the FIXME comment.
+    Prevents database images with excessive keypoints from dominating.
+    """
+    def __init__(self, matcher: DescriptorMatcher, min_matches: int = 10):
+        super().__init__(matcher)
+        self.min_matches = min_matches
+
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors,
+              database_image: np.ndarray, database_keypoints, database_descriptors):
+
+        if query_descriptors is None or database_descriptors is None:
+            return False, 0.0, {"reason": "no_descriptors"}
+
+        if len(query_descriptors) == 0 or len(database_descriptors) == 0:
+            return False, 0.0, {"reason": "no_descriptors"}
+
+        # Get good matches using ratio test
+        good_matches = self.matcher.match(query_descriptors, database_descriptors)
+
+        if len(good_matches) < self.min_matches:
+            return False, 0.0, {"reason": "not_enough_matches"}
+
+        # Symmetric normalization: sqrt(query_kpts * db_kpts)
+        normalization_factor = np.sqrt(len(query_keypoints) * len(database_keypoints))
+        symmetric_ratio = len(good_matches) / normalization_factor
+
+        info = {
+            "num_matches": len(good_matches),
+            "num_query_keypoints": len(query_keypoints),
+            "num_database_keypoints": len(database_keypoints),
+            "symmetric_ratio": float(symmetric_ratio),
+            "normalization_factor": float(normalization_factor)
+        }
+
+        return True, float(symmetric_ratio), info
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d['min_matches'] = self.min_matches
+        return d
+
+
+class HomographyDistanceScorer(Scorer):
+    """
+    Combines homography-based inlier ratio with descriptor distance consistency.
+
+    Hypothesis: Good matches should have consistent descriptor distances.
+    Lower std/mean ratio indicates more confident matching.
+
+    Score = inlier_ratio * distance_consistency_score
+    where distance_consistency = 1 / (1 + std/mean)
+    """
+    def __init__(self, matcher: DescriptorMatcher,
+                 ransac_thresh: float = 5.0,
+                 max_reproj_error: float = 5.0,
+                 min_points: int = 20,
+                 distance_weight: float = 0.3):
+        super().__init__(matcher)
+        self.ransac_thresh = ransac_thresh
+        self.max_reproj_error = max_reproj_error
+        self.min_points = min_points
+        self.distance_weight = distance_weight
+
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors,
+              database_image: np.ndarray, database_keypoints, database_descriptors):
+
+        src_kpts, src_desc, dst_kpts, dst_desc = self.matcher.match_keypoints_descriptors(
+            query_keypoints, query_descriptors, database_keypoints, database_descriptors)
+
+        if len(src_kpts) < self.min_points:
+            return False, 0.0, {"reason": "not_enough_points"}
+
+        src_pts = np.float32([kpt.pt for kpt in src_kpts])
+        dst_pts = np.float32([kpt.pt for kpt in dst_kpts])
+
+        M, mask = cv2.findHomography(src_pts, dst_pts, method=cv2.RANSAC,
+                                      ransacReprojThreshold=self.ransac_thresh)
+
+        if M is None or mask is None:
+            return False, 0.0, {"reason": "homography_failed"}
+
+        inliers = mask.ravel().astype(bool)
+        n_inliers = np.sum(inliers)
+        inlier_ratio = n_inliers / len(src_pts)
+
+        src_inliers = src_pts[inliers]
+        dst_inliers = dst_pts[inliers]
+
+        if len(src_inliers) == 0:
+            return False, 0.0, {"reason": "no_inliers"}
+
+        # Compute reprojection error
+        src_proj = cv2.perspectiveTransform(src_inliers.reshape(-1, 1, 2), M).reshape(-1, 2)
+        reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
+
+        # Check homography validity
+        det = np.linalg.det(M[:2, :2])
+        if det <= 0.4 or det > 10:
+            valid = False
+        elif reproj_error > self.max_reproj_error:
+            valid = False
+        else:
+            valid = True
+
+        # Compute match distance statistics for inliers
+        # Get original matches to access distances
+        matches = self.matcher.match(query_descriptors, database_descriptors)
+        inlier_matches = [m for i, m in enumerate(matches) if i < len(inliers) and inliers[i]]
+
+        if len(inlier_matches) > 0:
+            distances = [m.distance for m in inlier_matches]
+            distance_mean = np.mean(distances)
+            distance_std = np.std(distances)
+
+            # Avoid division by zero
+            if distance_mean > 0:
+                distance_consistency = 1.0 / (1.0 + distance_std / distance_mean)
+            else:
+                distance_consistency = 0.5  # Neutral value
+        else:
+            distance_consistency = 0.5
+
+        # Combined score: geometric quality * distance consistency
+        geometric_score = inlier_ratio
+        score = geometric_score * (1.0 - self.distance_weight + self.distance_weight * distance_consistency)
+
+        info = {
+            "n_inliers": int(n_inliers),
+            "total_matches": int(len(src_pts)),
+            "inlier_ratio": float(inlier_ratio),
+            "reproj_error": float(reproj_error),
+            "det": float(det),
+            "distance_mean": float(distance_mean) if len(inlier_matches) > 0 else None,
+            "distance_std": float(distance_std) if len(inlier_matches) > 0 else None,
+            "distance_consistency": float(distance_consistency)
+        }
+
+        return valid, float(score), info
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d['ransac_thresh'] = self.ransac_thresh
+        d['max_reproj_error'] = self.max_reproj_error
+        d['min_points'] = self.min_points
+        d['distance_weight'] = self.distance_weight
+        return d
+
+
+class MultiFactorScorer(Scorer):
+    """
+    EXPERIMENTAL: Multi-factor scorer combining multiple signals.
+
+    Combines:
+    1. Inlier ratio (geometric quality)
+    2. Reprojection error (spatial accuracy)
+    3. Match distance (descriptor confidence)
+
+    Score = w1*inlier_score + w2*reproj_score + w3*distance_score
+
+    TODO: Grid search over weights to find optimal combination.
+    This is marked for future exploration if time permits.
+    """
+    def __init__(self, matcher: DescriptorMatcher,
+                 ransac_thresh: float = 5.0,
+                 max_reproj_error: float = 5.0,
+                 min_points: int = 20,
+                 inlier_weight: float = 0.5,
+                 reproj_weight: float = 0.3,
+                 distance_weight: float = 0.2):
+        super().__init__(matcher)
+        self.ransac_thresh = ransac_thresh
+        self.max_reproj_error = max_reproj_error
+        self.min_points = min_points
+        self.inlier_weight = inlier_weight
+        self.reproj_weight = reproj_weight
+        self.distance_weight = distance_weight
+
+        # Normalize weights to sum to 1
+        total_weight = inlier_weight + reproj_weight + distance_weight
+        self.inlier_weight /= total_weight
+        self.reproj_weight /= total_weight
+        self.distance_weight /= total_weight
+
+    def score(self, query_image: np.ndarray, query_keypoints, query_descriptors,
+              database_image: np.ndarray, database_keypoints, database_descriptors):
+
+        src_kpts, src_desc, dst_kpts, dst_desc = self.matcher.match_keypoints_descriptors(
+            query_keypoints, query_descriptors, database_keypoints, database_descriptors)
+
+        if len(src_kpts) < self.min_points:
+            return False, 0.0, {"reason": "not_enough_points"}
+
+        src_pts = np.float32([kpt.pt for kpt in src_kpts])
+        dst_pts = np.float32([kpt.pt for kpt in dst_kpts])
+
+        M, mask = cv2.findHomography(src_pts, dst_pts, method=cv2.RANSAC,
+                                      ransacReprojThreshold=self.ransac_thresh)
+
+        if M is None or mask is None:
+            return False, 0.0, {"reason": "homography_failed"}
+
+        inliers = mask.ravel().astype(bool)
+        n_inliers = np.sum(inliers)
+        inlier_ratio = n_inliers / len(src_pts)
+
+        src_inliers = src_pts[inliers]
+        dst_inliers = dst_pts[inliers]
+
+        if len(src_inliers) == 0:
+            return False, 0.0, {"reason": "no_inliers"}
+
+        # Compute reprojection error
+        src_proj = cv2.perspectiveTransform(src_inliers.reshape(-1, 1, 2), M).reshape(-1, 2)
+        reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
+
+        # Check homography validity
+        det = np.linalg.det(M[:2, :2])
+        if det <= 0.4 or det > 10:
+            valid = False
+        elif reproj_error > self.max_reproj_error:
+            valid = False
+        else:
+            valid = True
+
+        # Factor 1: Inlier ratio (0 to 1, higher is better)
+        inlier_score = inlier_ratio
+
+        # Factor 2: Reprojection error (convert to 0-1, lower error is better)
+        reproj_score = 1.0 / (1.0 + reproj_error / self.max_reproj_error)
+
+        # Factor 3: Match distance consistency
+        matches = self.matcher.match(query_descriptors, database_descriptors)
+        inlier_matches = [m for i, m in enumerate(matches) if i < len(inliers) and inliers[i]]
+
+        if len(inlier_matches) > 0:
+            distances = [m.distance for m in inlier_matches]
+            distance_median = np.median(distances)
+            # Normalize: lower distance is better (convert to 0-1 score)
+            # Assume max distance around 200 for ORB, 0.5 for SIFT (normalize later)
+            distance_score = 1.0 / (1.0 + distance_median / 100.0)
+        else:
+            distance_score = 0.5
+
+        # Weighted combination
+        score = (self.inlier_weight * inlier_score +
+                 self.reproj_weight * reproj_score +
+                 self.distance_weight * distance_score)
+
+        info = {
+            "n_inliers": int(n_inliers),
+            "total_matches": int(len(src_pts)),
+            "inlier_ratio": float(inlier_ratio),
+            "reproj_error": float(reproj_error),
+            "det": float(det),
+            "inlier_score": float(inlier_score),
+            "reproj_score": float(reproj_score),
+            "distance_score": float(distance_score),
+            "final_score": float(score),
+            "weights": {
+                "inlier": self.inlier_weight,
+                "reproj": self.reproj_weight,
+                "distance": self.distance_weight
+            }
+        }
+
+        return valid, float(score), info
+
+    def to_dict(self) -> dict:
+        d = super().to_dict()
+        d['ransac_thresh'] = self.ransac_thresh
+        d['max_reproj_error'] = self.max_reproj_error
+        d['min_points'] = self.min_points
+        d['inlier_weight'] = self.inlier_weight
+        d['reproj_weight'] = self.reproj_weight
+        d['distance_weight'] = self.distance_weight
         return d
 
 
@@ -1576,4 +1990,3 @@ if __name__ == "__main__":
         print(f"{combo_name}: keypoints={n_kps}, descriptors_shape={dshape}, status={status}")
 
     print(f"\nAll images and visualizations saved under: {out_dir.resolve()}")
-     
