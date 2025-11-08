@@ -8,18 +8,20 @@ import pickle
 import json
 from pathlib import Path
 import sys
+from datetime import datetime
 
 # --- Fixes ModuleNotFoundError by adding project root to path ---
 project_root = Path(__file__).resolve().parent
 sys.path.append(str(project_root))
 
 # --- Local Project Imports ---
-from libs_week3.database import ImageDatabase
+from libs_week4.database import ImageDatabase
 from libs_week3.average_precision import mapk
 import grid_background_removal_week3
 
 # --- Imports the NEW generator from Week 4 ---
-from libs_week4.hyperparameter_combinations import keypoint_hyperparameter_grid_search
+from libs_week4.hyperparameter_combinations import descriptor_maker_grid_search, scorer_grid_search
+from libs_week4.descriptor import FittableDescriptorComputer
 
 
 def parse_arguments():
@@ -33,17 +35,18 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def load_queries(queries_path: str, multiple_paintings=True, generate_masks=True) -> tuple[list[dict[str, Any]], list[list[int]]]:
+def load_queries(queries_path: str, multiple_paintings=True, generate_masks=False) -> tuple[list[dict[str, Any]], list[list[int]]]:
     # This function is unchanged from your original script.
     queries = []
     with open(os.path.join(queries_path, "gt_corresps.pkl"), 'rb') as f:
         gt = pickle.load(f)
 
     for filename in sorted(os.listdir(queries_path)):
-        if not filename.endswith(".jpg"): continue
+        if not filename.endswith(".jpg"):
+            continue
         image_path = os.path.join(queries_path, filename)
         image = cv2.imread(image_path)
-        
+
         if multiple_paintings:
             imgs = grid_background_removal_week3.split_if_two_paintings(image)
         else:
@@ -85,99 +88,148 @@ def main():
     args = parse_arguments()
     os.makedirs(args.results_folder, exist_ok=True)
 
-    print("Loading database...")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Loading database...", flush=True)
     database = ImageDatabase.load(args.database_path)
 
-    print("Loading queries...")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Loading queries...", flush=True)
     queries, ground_truth = load_queries(args.queries_path)
 
-    for i, params in enumerate(keypoint_hyperparameter_grid_search()):
-        if i < args.from_iter or (i - args.from_iter) % args.every != 0:
+    # OUTER LOOP: Iterate over descriptor makers
+    for desc_idx, descriptor_maker in enumerate(descriptor_maker_grid_search()):
+
+        # Check if we should skip this descriptor based on command line args
+        if desc_idx < args.from_iter or (desc_idx - args.from_iter) % args.every != 0:
             continue
 
-        descriptor_maker = params['keypoint_descriptor']
-        matcher = params['matcher']
-        preprocess = params['preprocess']
-        color_conversion = params['color_conversion']
+        print(f"\n{'='*60}", flush=True)
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] DESCRIPTOR MAKER {desc_idx}", flush=True)
+        print(f"{'='*60}", flush=True)
 
-        print(f"\n--- Iteration {i:04d}: Descriptor: {descriptor_maker.to_dict()['type']}, Matcher: {matcher.to_dict()['matcher_type']} ---")
+        # Pretty print the descriptor maker configuration
+        descriptor_dict = descriptor_maker.to_dict()
+        print("\nDescriptor Configuration:", flush=True)
+        print(json.dumps(descriptor_dict, indent=2), flush=True)
 
-        # Keypoint descriptor logic (Steps 1, 2, 3)
-        start_time_total = time.time()
-        db_descriptors_cache = []
-        for db_image in database.images:
-            img = db_image.image
-            mask = np.ones(img.shape[:2], dtype=np.uint8) * 255
-            if preprocess: img, mask = preprocess(img, mask)
-            processed_img, processed_mask = color_conversion(img, mask)
-            _, descs = descriptor_maker.detect_and_compute(processed_img, processed_mask)
-            db_descriptors_cache.append({'id': db_image.id, 'descriptors': descs})
-        
-        results_top_5 = []
-        for query in queries:
-            query_image_results = []
-            for img, mask in zip(query['images'], query['masks']):
-                if preprocess: img, mask = preprocess(img, mask)
-                processed_img, processed_mask = color_conversion(img, mask)
-                _, query_descs = descriptor_maker.detect_and_compute(processed_img, processed_mask)
-                
-                if query_descs is None or len(query_descs) == 0:
-                    query_image_results.append([-1] * 5)
-                    continue
-                
-                match_counts = []
-                for db_entry in db_descriptors_cache:
-                    db_descs = db_entry['descriptors']
-                    num_matches = 0
-                    if db_descs is not None and len(db_descs) > 0:
-                        good_matches = matcher.match(query_descs, db_descs)
-                        num_matches = len(good_matches)
-                    match_counts.append({'id': db_entry['id'], 'matches': num_matches})
-                
-                sorted_results = sorted(match_counts, key=lambda x: x['matches'], reverse=True)
-                top_5_ids = [res['id'] for res in sorted_results[:5]]
-                while len(top_5_ids) < 5: top_5_ids.append(-1)
-                query_image_results.append(top_5_ids)
-            results_top_5.append(query_image_results)
-        
-        total_time = time.time() - start_time_total
-        print(f"  Total processing time for iteration: {total_time:.2f}s")
+        # Check if descriptor needs fitting (e.g., PCA-SIFT)
+        if isinstance(descriptor_maker.descriptor_computer, FittableDescriptorComputer):
+            print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Descriptor needs fitting. Fitting on database...", flush=True)
+            db_images, db_masks = database.get_images_and_masks()
+            start_time_fitting = time.time()
+            descriptor_maker.descriptor_computer.fit(db_images, db_masks)
+            fitting_time = time.time() - start_time_fitting
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Fitting time: {fitting_time:.2f}s", flush=True)
+        else:
+            fitting_time = 0.0
 
-        # Reconciliation block to handle detection mismatches robustly
-        reconciled_results = []
-        no_result_placeholder = [-1] * 5
-        for idx, gt_item in enumerate(ground_truth):
-            res_item = results_top_5[idx]
-            len_gt, len_res = len(gt_item), len(res_item)
-            if len_gt == len_res:
-                reconciled_results.append(res_item)
-            elif len_res < len_gt:
-                reconciled_results.append(res_item + [no_result_placeholder] * (len_gt - len_res))
+        # COMPUTE DESCRIPTORS ONCE for this descriptor maker
+        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Computing descriptors for entire database...", flush=True)
+        start_time_descriptors = time.time()
+        database.reset_descriptors_distances_and_scores()
+        database.compute_keypoints_and_descriptors(descriptor_maker)
+        descriptor_time = time.time() - start_time_descriptors
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Descriptor computation time: {descriptor_time:.2f}s", flush=True)
+
+        # Compute and print statistics
+        stats = database.compute_keypoint_descriptor_statistics()
+        print("\nKeypoint & Descriptor Statistics:", flush=True)
+        print(json.dumps(stats, indent=2), flush=True)
+
+        # Store results for all scorer configurations
+        all_results = []
+
+        # INNER LOOP: Iterate over scorer configurations
+        for scorer_idx, scorer_config in enumerate(scorer_grid_search(descriptor_maker, include_alternative_scorers=True)):
+
+            matcher = scorer_config['matcher']
+            scorer = scorer_config['scorer']
+
+            # Use to_dict() for generic scorer info (works for all scorer types)
+            scorer_dict = scorer.to_dict()
+            scorer_class = scorer_dict.get('class', 'Unknown')
+
+            # Build a concise description based on scorer type
+            if hasattr(scorer, 'ransac_thresh') and hasattr(scorer, 'min_points'):
+                # HomographyScorer, HomographyDistanceScorer, or MultiFactorScorer
+                scorer_desc = f"ransac={scorer.ransac_thresh:.1f}, min_pts={scorer.min_points}"
             else:
-                reconciled_results.append(res_item[:len_gt])
+                # MatchRatioScorer or SymmetricMatchRatioScorer
+                scorer_desc = f"min_matches={scorer_dict.get('min_matches', 'N/A')}"
 
-        # --- CORRECT EVALUATION ---
-        # 1. Prepare the data using your trusted flattening function.
-        # 2. Call mapk with the correct argument order.
-        map_gt, map_top_5 = prepare_gt_and_results_for_mapk(ground_truth, reconciled_results)
+            print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] --- Scorer {scorer_idx} ({scorer_class}): "
+                  f"ratio={matcher.ratio_test_threshold:.2f}, {scorer_desc} ---", flush=True)
 
-        map5 = mapk(map_gt, map_top_5, k=5)
-        map1 = mapk(map_gt, map_top_5, k=1)
-        
-        print(f"  --> Results: map@k1={map1:.4f}, map@k5={map5:.4f}")
+            # Query and evaluate WITHOUT recomputing descriptors
+            start_time_query = time.time()
 
-        # Save results
-        results_data = {
-            'params': {
-                'keypoint_descriptor': descriptor_maker.to_dict(),
-                'matcher': matcher.to_dict(),
-                'preprocess': preprocess.to_dict() if preprocess else None,
-                'color_conversion': color_conversion.to_dict()
-            },
-            'metrics': {'map@k1': map1, 'map@k5': map5},
-            'timing': {'total': total_time}
-        }
-        save_results_for_config(args.results_folder, i, results_data)
+            results_top_5 = []
+            for query in queries:
+                query_image_results = []
+                for img, mask in zip(query['images'], query['masks']):
+                    query_keypoints, query_descriptors = descriptor_maker.detect_and_compute(img, mask)
+
+                    result = database.query(img, query_keypoints, query_descriptors, scorer, k=10)
+
+                    top_5_ids = [res.id for res in result[:5]]
+                    while len(top_5_ids) < 5: top_5_ids.append(-1)
+                    query_image_results.append(top_5_ids)
+                results_top_5.append(query_image_results)
+
+            query_time = time.time() - start_time_query
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]   Query processing time: {query_time:.2f}s", flush=True)
+
+            # Reconciliation block to handle detection mismatches robustly
+            reconciled_results = []
+            no_result_placeholder = [-1] * 5
+            for idx, gt_item in enumerate(ground_truth):
+                res_item = results_top_5[idx]
+                len_gt, len_res = len(gt_item), len(res_item)
+                if len_gt == len_res:
+                    reconciled_results.append(res_item)
+                elif len_res < len_gt:
+                    reconciled_results.append(res_item + [no_result_placeholder] * (len_gt - len_res))
+                else:
+                    reconciled_results.append(res_item[:len_gt])
+
+            # --- CORRECT EVALUATION ---
+            # 1. Prepare the data using your trusted flattening function.
+            # 2. Call mapk with the correct argument order.
+            map_gt, map_top_5 = prepare_gt_and_results_for_mapk(ground_truth, reconciled_results)
+
+            map5 = mapk(map_gt, map_top_5, k=5)
+            map1 = mapk(map_gt, map_top_5, k=1)
+
+            print(f"  --> Results: map@k1={map1:.4f}, map@k5={map5:.4f}", flush=True)
+
+            # Append results with BOTH descriptor maker and scorer parameters
+            all_results.append({
+                'params': {
+                    'keypoint_and_descriptor_maker': descriptor_maker.to_dict(),
+                    'matcher': matcher.to_dict(),
+                    'scorer': scorer.to_dict()
+                },
+                'metrics': {'map@k1': map1, 'map@k5': map5},
+                'timing': {
+                    'fitting_time': fitting_time,
+                    'descriptor_computation_time': descriptor_time,
+                    'query_time': query_time
+                },
+                'indices': {'desc_idx': desc_idx, 'scorer_idx': scorer_idx},
+                'statistics': stats,
+                'predictions': {
+                    'ground_truth': ground_truth,
+                    'reconciled_results': reconciled_results
+                }
+            })
+
+        # Save all results for this descriptor maker in one file
+        save_results_for_config(args.results_folder, desc_idx, all_results)
+
+        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Completed all {len(all_results)} scorer configs for descriptor maker {desc_idx}", flush=True)
+        print(f"Results saved to {args.results_folder}/{desc_idx:05d}.json", flush=True)
+
+    print(f"\n{'='*60}", flush=True)
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] GRID SEARCH COMPLETE", flush=True)
+    print(f"{'='*60}", flush=True)
 
 if __name__ == "__main__":
     main()

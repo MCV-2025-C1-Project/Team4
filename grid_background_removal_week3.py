@@ -341,7 +341,7 @@ class GradientBasedSplitter:
 
             top_img = img_rgb[:split_row, :]
             bottom_img = img_rgb[split_row:, :]
-            return [top_img, bottom_img]
+            return [cv2.cvtColor(top_img, cv2.COLOR_RGB2BGR), cv2.cvtColor(bottom_img, cv2.COLOR_RGB2BGR)]
 
     def _visualize_split(self, img_rgb: np.ndarray, direction: str, split_pos: int,
                          profile: np.ndarray, min_val: float, mean_side: float):
@@ -709,7 +709,7 @@ class PaintingSplitPipeline:
         return case, sub_images
 
 
-def split_if_two_paintings(img: np.ndarray, debug=False, grad_valley_thresh=8.5, valley_width_frac=0.05):
+def split_if_two_paintings(img: np.ndarray, debug=False, grad_valley_thresh=7.0, valley_width_frac=0.03):    
     """
     Detects if an image contains one or two paintings and splits accordingly.
 
