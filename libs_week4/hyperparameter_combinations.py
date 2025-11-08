@@ -290,6 +290,52 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     # for config in generate_gloh_configs():
     #     yield GLOHDescriptor(**config)
 
+    # ORB: Best performer - fast and accurate
+    #### for config in generate_orb_configs(): # these are the three best
+        #### yield ORBDescriptor(**config) # these are the three best
+
+    # RootSIFT: Strong alternative to ORB
+    #### for config in generate_rootsift_configs(): # these are the three best
+        #### yield RootSIFTDescriptor(**config) # these are the three best
+
+    # PCA-SIFT: Exploratory - now with proper database-wide PCA fitting
+    #### for config in generate_pcasift_configs(): # these are the three best
+        #### yield PCASIFTDescriptor(**config) # these are the three best
+
+    # === DISCARDED DESCRIPTORS (from ranking analysis) ===
+
+    # SIFT: Consistently worse than RootSIFT (0.59-0.64 vs 0.69-0.77)
+    # for config in generate_sift_configs():
+    #     yield SIFTDescriptor(**config)
+
+    # KAZE: Too slow (455-544s) + poor performance (0.46-0.54) + too many keypoints (5k-24k)
+    # for config in generate_kaze_configs():
+    #     yield KAZEDescriptor(**config)
+
+    # SURF: Not available by default in opencv
+    # for config in generate_surf_configs():
+    #     yield SURFDescriptor(**config)
+
+    # BRISK: Too many keypoints, slow
+    # for config in generate_brisk_configs():
+    #     yield BRISKDescriptor(**config)
+
+    # AKAZE: Poor performance (mAP@k1 ~0.45), some configs fail
+    # for config in generate_akaze_configs():
+    #     yield AKAZEDescriptor(**config)
+
+    # DAISY: Too many keypoints (24k at step=16), very slow
+    # for config in generate_daisy_configs():
+    #     yield DaisyDescriptor(**config)
+
+    # HOG: Very poor performance
+    # for config in generate_hog_configs():
+    #     yield HOGDescriptor(**config)
+
+    # GLOH: Very poor performance
+    # for config in generate_gloh_configs():
+    #     yield GLOHDescriptor(**config)
+
 
 def generate_color_space_combinations() -> list[list[ColorSpace]]:
     return [[ColorSpace.BGR]]

@@ -709,7 +709,7 @@ class PaintingSplitPipeline:
         return case, sub_images
 
 
-def split_if_two_paintings(img: np.ndarray, debug=False, grad_valley_thresh=7.0, valley_width_frac=0.03):    
+def split_if_two_paintings(img: np.ndarray, debug=False, grad_valley_thresh=7.0, valley_width_frac=0.03):
     """
     Detects if an image contains one or two paintings and splits accordingly.
 

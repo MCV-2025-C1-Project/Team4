@@ -14,17 +14,6 @@ from cv2 import xfeatures2d
 from libs_week3.color_conversion import ColorConversion, ColorSpace
 from libs_week3.preprocessing import ImagePreprocessStep
 
-class ColorSpace(enum.Enum):
-    RGB = 'RGB'
-    # GRAY = 'GRAY'
-    HSV = 'HSV'
-    LAB = 'LAB'
-    YCRCB = 'YCRCB'
-    HLS = 'HLS'
-    CMYK = 'CMYK'
-    LUV = 'LUV'
-    XYZ = 'XYZ'
-    YUV = 'YUV'
 
 class DescriptorValueType(enum.Enum):
     """Enum to distinguish between float and binary descriptors for proper matching."""
@@ -248,16 +237,17 @@ class SIFTFinder(KeypointFinder):
         return {"type": "SIFT", "n_features": self.sift.getNFeatures(), "n_octave_layers": self.sift.getNOctaveLayers(),
                 "contrast_threshold": self.sift.getContrastThreshold(), "edge_threshold": self.sift.getEdgeThreshold(), "sigma": self.sift.getSigma()}
 
+
 class DescriptorComputer(abc.ABC):
     #keypoint descriptor class
-    
+
     @abc.abstractmethod
     def detect_and_compute(self, image: np.ndarray, mask: np.ndarray | None = None) -> tuple[list, np.ndarray]:
-        
+
         #Detect keypoints and compute descriptors.
         #Returns: keypoints: List of cv2.KeyPoint objects, descriptors: Array of shape (n_keypoints, descriptor_dim)
         pass
-    
+
     @abc.abstractmethod
     def to_dict(self) -> dict[str, Any]:
         pass
@@ -283,6 +273,7 @@ class FittableDescriptorComputer(DescriptorComputer):
     def is_fitted(self) -> bool:
         pass
 
+
 class CombinedDescriptor(DescriptorComputer):
     def __init__(self, finder: KeypointFinder = None , descriptor: DescriptorComputer = None):
         self.finder = finder
@@ -303,10 +294,10 @@ class CombinedDescriptor(DescriptorComputer):
     def get_value_type(self) -> DescriptorValueType:
         return self.descriptor.get_value_type()
 
+
 class ORBDescriptor(DescriptorComputer):
     def __init__(self, n_features: int = 500, scale_factor: float = 1.2, n_levels: int = 8,
-                 wta_k: int = 2, score_type: int = cv2.ORB_HARRIS_SCORE, patch_size: int = 31, finder: KeypointFinder = None):
-        self.finder = finder
+                 wta_k: int = 2, score_type: int = cv2.ORB_HARRIS_SCORE, patch_size: int = 31):
         self.n_features = n_features
         self.scale_factor = scale_factor
         self.n_levels = n_levels
@@ -365,8 +356,7 @@ class ORBDescriptor(DescriptorComputer):
         return DescriptorValueType.BINARY
 
 class DaisyDescriptor(DescriptorComputer):
-    def __init__(self, step: int = 4, radius: int = 15, rings: int = 3, histograms: int = 8, orientations: int = 8, finder: KeypointFinder = None):
-        self.finder = finder
+    def __init__(self, step: int = 4, radius: int = 15, rings: int = 3, histograms: int = 8, orientations: int = 8):
         self.step = step
         self.radius = radius
         self.rings = rings
@@ -440,8 +430,7 @@ class DaisyDescriptor(DescriptorComputer):
         return DescriptorValueType.FLOAT
 
 class SIFTDescriptor(DescriptorComputer):
-    def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6, finder: KeypointFinder = None):
-        self.finder = finder
+    def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6):
         self.n_features = n_features
         self.n_octave_layers = n_octave_layers
         self.contrast_threshold = contrast_threshold
@@ -473,7 +462,7 @@ class SIFTDescriptor(DescriptorComputer):
             gray = (image * 255).astype(np.uint8)
         _, descriptors = self.sift.compute(gray, keypoints)
         return descriptors
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "type": "SIFT",
@@ -488,8 +477,7 @@ class SIFTDescriptor(DescriptorComputer):
         return DescriptorValueType.FLOAT
 
 class RootSIFTDescriptor(DescriptorComputer):
-    def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6, finder: KeypointFinder = None):
-        self.finder = finder
+    def __init__(self, n_features: int = 0, n_octave_layers: int = 3, contrast_threshold: float = 0.04, edge_threshold: float = 10, sigma: float = 1.6):
         self.n_features = n_features
         self.n_octave_layers = n_octave_layers
         self.contrast_threshold = contrast_threshold
@@ -543,6 +531,7 @@ class RootSIFTDescriptor(DescriptorComputer):
 
         return descriptors
 
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "type": "RootSIFT",
@@ -557,10 +546,8 @@ class RootSIFTDescriptor(DescriptorComputer):
         return DescriptorValueType.FLOAT
 
 
-
 class BRISKDescriptor(DescriptorComputer):
-    def __init__(self, thresh: int = 30, octaves: int = 3, pattern_scale: float = 1.0, finder: KeypointFinder = None):
-        self.finder = finder
+    def __init__(self, thresh: int = 30, octaves: int = 3, pattern_scale: float = 1.0):
         self.thresh = thresh
         self.octaves = octaves
         self.pattern_scale = pattern_scale
@@ -574,7 +561,7 @@ class BRISKDescriptor(DescriptorComputer):
 
         keypoints, descriptors = self.brisk.detectAndCompute(gray, mask)
         return keypoints, descriptors
-    
+
     def detect(self, image: np.ndarray, mask: np.ndarray | None = None) -> list[cv2.KeyPoint]:
         if len(image.shape) == 3:
             gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
@@ -606,9 +593,7 @@ class BRISKDescriptor(DescriptorComputer):
 class KAZEDescriptor(DescriptorComputer):
     def __init__(self, extended: bool = False, upright: bool = False,
                  threshold: float = 0.001, n_octaves: int = 4,
-                 n_octave_layers: int = 4, diffusivity: int = cv2.KAZE_DIFF_PM_G2,
-                 finder: KeypointFinder = None):
-        self.finder = finder
+                 n_octave_layers: int = 4, diffusivity: int = cv2.KAZE_DIFF_PM_G2):
         self.extended = extended
         self.upright = upright
         self.threshold = threshold
@@ -1095,7 +1080,7 @@ class HOGDescriptor(DescriptorComputer):
             "block_stride": self.block_stride,
             "cell_size": self.cell_size,
             "nbins": self.nbins,
-            
+
             # SIFT detector params
             # "detector_type": "SIFT",
             # "n_features": self.n_features,
@@ -1431,7 +1416,8 @@ class HomographyScorer(Scorer):
         reproj_error = np.sqrt(np.mean(np.sum((src_proj - dst_inliers) ** 2, axis=1)))
 
         det = np.linalg.det(M[:2, :2])
-        if det <= 0.4 or det > 9999:  # Negative det is a flip, det too large/small is bad
+
+        if det <= 0.4 or det > 9999:  # Negative det is a flip, det too small is bad, but apparently too large is A-OK
             valid = False
         elif reproj_error > self.max_reproj_error:
             valid = False
@@ -1894,6 +1880,9 @@ if __name__ == "__main__":
         descriptors.append(GLOHDescriptor(finder=SIFTFinder(n_features=500), nbins=36, n_features=500))
     except Exception as e:
         print("GLOHDescriptor unavailable:", e)
+        # print(f"ArticleGLOHDescriptor FAILED. Error: {e}")
+        # print("This might be because the internal SIFT detector failed.")
+        
     # SURF often requires xfeatures; skip if not available
     try:
         descriptors.append(SURFDescriptor())

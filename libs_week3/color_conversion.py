@@ -6,6 +6,7 @@ from libs_week3.preprocessing import ImagePreprocessStep
 
 class ColorSpace(enum.Enum):
     BGR = 'BGR'
+    RGB = 'RGB'
     # GRAY = 'GRAY'
     HSV = 'HSV'
     LAB = 'LAB'
