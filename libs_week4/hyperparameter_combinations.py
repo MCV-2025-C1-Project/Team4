@@ -73,22 +73,24 @@ def generate_sift_configs() -> Iterator[Dict[str, Any]]:
         yield dict(zip(keys, v))
 
 def generate_rootsift_configs() -> Iterator[Dict[str, Any]]:
-    # OPTIMIZED GRID (18 configs): Strong second place after ORB
-    # mAP@k1 = 0.69-0.77 (competitive with ORB), computation time ~100-190s
+    # EXPERIMENTAL: RISKY CONFIGS ONLY (for textureless images)
+    # This is a focused experiment to test if lower thresholds help textureless images
+    # without re-running the safe configs we already tested.
     #
-    # Key findings from experiments:
-    # - n_features: 1000 performs as well as 2000, add 1500 to explore
-    # - contrast_threshold: Both 0.03 and 0.04 work well (0.03 slightly better)
-    # - sigma: Both 1.6 and 2.0 are good
-    # - Best configs have ratio=0.7 and ransac=3.0 (tight matching)
+    # RISKY PARAMETERS (for textureless images):
+    # - contrast_threshold: 0.01, 0.02 (REMOVED safe 0.03, 0.04)
+    # - edge_threshold: 10 (REMOVED safe 15)
+    # - Keeping n_features and sigma variations as in original
+    #
+    # WARNING: May degrade performance on textured images or add noise
     param_grid = {
         'n_features': [1000, 1500, 2000],
         'n_octave_layers': [4],
-        'contrast_threshold': [0.03, 0.04],
+        'contrast_threshold': [0.01, 0.02],  # RISKY ONLY: Low thresholds for textureless images
         'sigma': [1.6, 2.0],
-        'edge_threshold': [15]
+        'edge_threshold': [10]  # RISKY ONLY: Low edge threshold
     }
-    # Total: 3 × 2 × 2 = 12 configs
+    # Total: 3 × 2 × 2 × 1 = 12 configs (focused on risky params)
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
         yield dict(zip(keys, v))
@@ -228,17 +230,19 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     Generates instances of different keypoint descriptors by iterating
     through all their specified hyperparameter configurations.
 
-    OPTIMIZED BASED ON RANKING RESULTS:
-    - ORB: 6 configs (mAP@k1=0.74-0.77, WINNER!)
-    - RootSIFT: 12 configs (mAP@k1=0.69-0.77, strong second)
-    - PCA-SIFT: 4 configs (exploratory with proper fitting)
-    Total: 22 descriptor configs (down from 104)
+    EXPERIMENTAL BRANCH: RISKY CONFIGS ONLY
+    Testing ONLY risky RootSIFT configs to see if they help textureless images.
+    - Removed ORB entirely (already tested, 94.8% baseline)
+    - RootSIFT: 12 RISKY configs with low thresholds:
+      - contrast_threshold: 0.01, 0.02 (vs safe 0.03)
+      - edge_threshold: 10 (vs safe 15)
+    Total: 12 descriptor configs × 5 scorer configs = 60 experiments
     """
-    # ORB: Best performer - fast and accurate
-    for config in generate_orb_configs():
-        yield ORBDescriptor(**config)
+    # === EXPERIMENTAL BRANCH: RISKY CONFIGS ONLY ===
+    # Removed ORB to avoid repeating experiments
+    # Keeping only risky RootSIFT configs to test textureless image support
 
-    # RootSIFT: Strong alternative to ORB
+    # RootSIFT: RISKY configs with low thresholds
     for config in generate_rootsift_configs():
         yield RootSIFTDescriptor(**config)
 
@@ -400,16 +404,19 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker, include_alt
     """
     Generator for scorer configurations for a given descriptor maker.
 
-    OPTIMIZED BASED ON LATEST RANKING RESULTS (94.8% mAP@k1):
-    - ratio_threshold=0.65 is clearly superior to 0.7 (top results all use 0.65)
-    - ransac_thresh=3.0 is optimal (5.0, 8.0 perform worse)
-    - max_reproj_error=3.0 is optimal (5.0, 8.0 perform worse)
-    - reproj_error_penalty_weight=0.1 works best when enabled (0.5 too harsh)
-    - min_points: [15, 20, 25] all viable, explore tradeoff
-    - use_reproj_error_penalty: Both True/False viable, depends on scenario
+    EXPERIMENTAL BRANCH: RISKY CONFIGS ONLY (min_points=10)
+    Testing if very low min_points (10) can help match textureless images
+    that have few keypoints detected with risky descriptor thresholds.
 
-    NOTE: 2 textureless images have kpts_min=0 (no keypoints detected).
-    Modifying scorer parameters CANNOT help these cases - they need keypoints first.
+    Normal optimal values (from 94.8% mAP@k1 baseline):
+    - ratio_threshold=0.65 (kept: 0.65, 0.7)
+    - ransac_thresh=3.0 (kept)
+    - max_reproj_error=3.0 (kept)
+    - min_points=20 (REPLACED with 10 for this experiment)
+    - reproj_error_penalty_weight=0.1 or 0.2 (kept)
+
+    WARNING: min_points=10 is VERY LOW and may cause false positives.
+    This is intentional to see if we can salvage textureless images.
 
     Args:
         descriptor_maker: The KeypointAndDescriptorMaker to generate scorers for
@@ -432,122 +439,58 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker, include_alt
     else:  # BINARY
         norm_type = cv2.NORM_HAMMING
 
-    # OPTIMIZED GRID (12 configs): Focus on proven winners from latest ranking
-    # Based on ranking: ratio=0.65 + ransac=3.0 + max_reproj=3.0 is optimal
-    # Explore penalty weights (0.1, 0.2) and min_points (15, 20, 25)
+    # EXPERIMENTAL: RISKY CONFIGS ONLY (min_points=10 for textureless images)
+    # Removed all safe configs (min_points 15, 20, 25) to focus experiment
+    # Testing ONLY min_points=10 to see if it helps textureless images
+    #
+    # RISKY PARAMETER:
+    # - min_points: 10 (very low threshold to allow matching with few keypoints)
+    # WARNING: May allow false positives on textured images
     scorer_configs = [
-        # === BEST CONFIGURATIONS (ratio=0.65, proven winner) ===
-
-        # Config 1: Top performer - ratio=0.65, no penalty
+        # Config 1: RISKY - min_points=10, ratio=0.65, no penalty
         {
             'ratio_threshold': 0.65,
             'ransac_thresh': 3.0,
             'max_reproj_error': 3.0,
             'use_reproj_error_penalty': False,
-            'reproj_error_penalty_weight': 0.1,  # Ignored when penalty=False
-            'min_points': 20
+            'reproj_error_penalty_weight': 0.1,
+            'min_points': 10  # RISKY: Very low threshold for textureless images
         },
-        # Config 2: Gentle penalty (10% weight) - also top tier
+        # Config 2: RISKY - min_points=10, ratio=0.65, gentle penalty
         {
             'ratio_threshold': 0.65,
             'ransac_thresh': 3.0,
             'max_reproj_error': 3.0,
             'use_reproj_error_penalty': True,
             'reproj_error_penalty_weight': 0.1,
-            'min_points': 20
+            'min_points': 10  # RISKY: Very low threshold for textureless images
         },
-        # Config 3: Moderate penalty (20% weight) - explore if better than 0.1
+        # Config 3: RISKY - min_points=10, ratio=0.65, moderate penalty
         {
             'ratio_threshold': 0.65,
             'ransac_thresh': 3.0,
             'max_reproj_error': 3.0,
             'use_reproj_error_penalty': True,
             'reproj_error_penalty_weight': 0.2,
-            'min_points': 20
+            'min_points': 10  # RISKY: Very low threshold for textureless images
         },
-        # Config 4: Lower min_points (easier matching for challenging cases)
-        {
-            'ratio_threshold': 0.65,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': False,
-            'reproj_error_penalty_weight': 0.1,
-            'min_points': 15
-        },
-        # Config 5: Higher min_points (stricter matching)
-        {
-            'ratio_threshold': 0.65,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': False,
-            'reproj_error_penalty_weight': 0.1,
-            'min_points': 25
-        },
-        # Config 6: Gentle penalty + lower min_points
-        {
-            'ratio_threshold': 0.65,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': True,
-            'reproj_error_penalty_weight': 0.1,
-            'min_points': 15
-        },
-        # Config 7: Gentle penalty + higher min_points
-        {
-            'ratio_threshold': 0.65,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': True,
-            'reproj_error_penalty_weight': 0.1,
-            'min_points': 25
-        },
-
-        # === SECONDARY CONFIGURATIONS (ratio=0.7, backup option) ===
-
-        # Config 8: ratio=0.7, no penalty
+        # Config 4: RISKY - min_points=10, ratio=0.7, no penalty
         {
             'ratio_threshold': 0.7,
             'ransac_thresh': 3.0,
             'max_reproj_error': 3.0,
             'use_reproj_error_penalty': False,
             'reproj_error_penalty_weight': 0.1,
-            'min_points': 20
+            'min_points': 10  # RISKY: Very low threshold for textureless images
         },
-        # Config 9: ratio=0.7, gentle penalty
+        # Config 5: RISKY - min_points=10, ratio=0.7, gentle penalty
         {
             'ratio_threshold': 0.7,
             'ransac_thresh': 3.0,
             'max_reproj_error': 3.0,
             'use_reproj_error_penalty': True,
             'reproj_error_penalty_weight': 0.1,
-            'min_points': 20
-        },
-        # Config 10: ratio=0.7, lower min_points
-        {
-            'ratio_threshold': 0.7,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': False,
-            'reproj_error_penalty_weight': 0.1,
-            'min_points': 15
-        },
-        # Config 11: ratio=0.7, higher min_points
-        {
-            'ratio_threshold': 0.7,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': False,
-            'reproj_error_penalty_weight': 0.1,
-            'min_points': 25
-        },
-        # Config 12: ratio=0.7, moderate penalty
-        {
-            'ratio_threshold': 0.7,
-            'ransac_thresh': 3.0,
-            'max_reproj_error': 3.0,
-            'use_reproj_error_penalty': True,
-            'reproj_error_penalty_weight': 0.2,
-            'min_points': 20
+            'min_points': 10  # RISKY: Very low threshold for textureless images
         },
     ]
 
