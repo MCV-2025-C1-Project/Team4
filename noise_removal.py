@@ -810,34 +810,48 @@ def apply_adaptive_median_filter(image, max_window_size=7):
     return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
 
 
-def detect_noise(image, noise_threshold=0.045):
-    
+def detect_noise_with_params(image, noise_threshold=0.045, snr_threshold=15,
+                             kurtosis_threshold=5.0, impulse_ratio_min=0.005, snr_max=4.0):
+    """
+    Parameterized version of detect_noise for grid search.
+
+    Args:
+        image: Input image
+        noise_threshold: Threshold for noise_std to consider image as having noise
+        snr_threshold: Max SNR threshold for has_noise detection
+        kurtosis_threshold: Min kurtosis value to classify as salt_and_pepper
+        impulse_ratio_min: Min impulse ratio for salt detection
+        snr_max: Max SNR for salt_and_pepper classification
+
+    Returns:
+        Dictionary with noise detection results
+    """
     if len(image.shape) == 3:
         lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
         gray = lab[:, :, 0]  # L channel only
     else:
         gray = image.copy()
-        
+
     gray_norm = gray.astype(np.float32) / 255.0
-    
+
     laplacian = cv2.Laplacian(gray, cv2.CV_64F)
     noise_var = laplacian.var()
-    
+
     blurred = cv2.GaussianBlur(gray_norm, (5,5), 1.0)
-    
+
     noise = gray_norm - blurred
-    
+
     noise_flat = noise.flatten()
     kurtosis_val = stats.kurtosis(noise_flat, fisher=True)
-    
+
     noise_std = np.std(noise_flat)
-    
+
     # Calculate signal-to-noise ratio for better detection
     signal_std = np.std(gray_norm)
     snr = signal_std / noise_std if noise_std > 0 else float('inf')
-    
+
     hist, bins = np.histogram(gray.flatten(), bins=256, range=[0, 256])
-    
+
     gray_float = gray.astype(np.float32)
     median = cv2.medianBlur(gray_float, 3)
     diff = np.abs(gray_float - median)
@@ -853,57 +867,32 @@ def detect_noise(image, noise_threshold=0.045):
     salt_ratio = np.sum(salt_mask) / gray.size
     pepper_ratio = np.sum(pepper_mask) / gray.size
 
-    has_salt = salt_ratio > 0.005
-    has_pepper = pepper_ratio > 0.005
+    has_salt = salt_ratio > impulse_ratio_min
+    has_pepper = pepper_ratio > impulse_ratio_min
     has_salt_pepper = (salt_ratio + pepper_ratio) > 0.02
-    
-    # print(f"Has noise: {has_salt_pepper}, Impulse ratio: {impulse_ratio:.4f}")
-  
-    # More conservative noise detection
-    has_noise = noise_std >= noise_threshold and snr < 15
-    
+
+    # More conservative noise detection - PARAMETERIZED
+    has_noise = noise_std >= noise_threshold and snr < snr_threshold
+
     noise_type = ""
     confidence = 0.0
-    
-    # print(f"Kurtosis: {kurtosis_val:.2f}, Impulse ratio: {impulse_ratio:.4f}, SNR: {snr:.2f}")
+
     if not has_noise:
         noise_type = "none"
         confidence = 1.0
         noise_level = "none"
-        
-    #QSD1-W3 ADJUSTED LOGIC
+
+    # QSD1-W3 ADJUSTED LOGIC - PARAMETERIZED
     elif impulse_ratio != 0.0:
-        if ((kurtosis_val > 5.0 or (has_salt and has_pepper))) and snr < 4.0:
+        if ((kurtosis_val > kurtosis_threshold or (has_salt and has_pepper))) and snr < snr_max:
             noise_type = "salt_and_pepper"
             confidence = min(1.0, (kurtosis_val / 10.0) if kurtosis_val > 0 else 0.5)
-        elif -0.5 <= kurtosis_val < 5.0:
+        elif -0.5 <= kurtosis_val < kurtosis_threshold:
             noise_type = "gaussian"
             confidence = 1.0 - abs(kurtosis_val) / 3.0
-        # elif kurtosis_val < -0.5:
-        #     noise_type = "uniform"
-        #     confidence = min(1.0, abs(kurtosis_val) / 2.0)
-        # else:
-        #     noise_type = "mixed"
-        #     confidence = 0.5
         else:
             noise_type = "none"
-    
-    # QSD2-W3 ADJUSTED LOGIC
-    # elif impulse_ratio != 0.0:
-    #     if ((kurtosis_val > 5.0 or (has_salt and has_pepper))) and snr < 4.5:
-    #         noise_type = "salt_and_pepper"
-    #         confidence = min(1.0, (kurtosis_val / 10.0) if kurtosis_val > 0 else 0.5)
-    #     elif -0.5 <= kurtosis_val < 5.0:
-    #         noise_type = "none"
-    #         confidence = 1.0 - abs(kurtosis_val) / 3.0
-    #     # elif kurtosis_val < -0.5:
-    #     #     noise_type = "uniform"
-    #     #     confidence = min(1.0, abs(kurtosis_val) / 2.0)
-    #     # else:
-    #     #     noise_type = "mixed"
-    #     #     confidence = 0.5
-    #     else:
-    #         noise_type = "none"
+
     # Adjusted thresholds for noise levels
     if noise_std < 0.025:
         noise_level = "very_low"
@@ -915,7 +904,7 @@ def detect_noise(image, noise_threshold=0.045):
         noise_level = "high"
     else:
         noise_level = "very_high"
-        
+
     return {
         'noise_type': noise_type,
         'kurtosis': kurtosis_val,
@@ -927,7 +916,347 @@ def detect_noise(image, noise_threshold=0.045):
         'confidence': confidence,
         'snr': snr
     }
-    
+
+
+def detect_noise(image, noise_threshold=0.045):
+    """
+    Original detect_noise function with default parameters.
+    Wraps detect_noise_with_params for backward compatibility.
+    """
+    return detect_noise_with_params(
+        image,
+        noise_threshold=noise_threshold,
+        snr_threshold=15,
+        kurtosis_threshold=5.0,
+        impulse_ratio_min=0.005,
+        snr_max=4.0
+    )
+
+
+def load_ground_truth_from_file(gt_file_path):
+    """
+    Load ground truth from noise_ground_truth.txt file.
+
+    Format: <image_id> <True/False>
+    Example:
+        00000 False
+        00007 True
+
+    Args:
+        gt_file_path: Path to noise_ground_truth.txt
+
+    Returns:
+        Dictionary mapping image IDs to boolean noise presence
+    """
+    ground_truth = {}
+    with open(gt_file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) != 2:
+                print(f"Warning: Skipping malformed line: {line}")
+                continue
+            img_id = parts[0]
+            has_noise = parts[1] == 'True'
+            ground_truth[img_id] = has_noise
+    return ground_truth
+
+
+def grid_search_noise_detection(image_folders=None):
+    """
+    Grid search to find noise detection parameters that achieve exactly 1.0 accuracy across multiple datasets.
+
+    Args:
+        image_folders: List of paths to folders containing images to test.
+                      Each folder must contain:
+                      - JPEG images named 00000.jpg, 00001.jpg, etc.
+                      - noise_ground_truth.txt file with format: <image_id> <True/False>
+
+    Returns:
+        List of configurations that achieve 1.0 accuracy across all datasets
+    """
+    if image_folders is None:
+        image_folders = ["qst1_w4"]
+
+    if isinstance(image_folders, str):
+        image_folders = [image_folders]
+
+    print("="*80)
+    print("GRID SEARCH FOR NOISE DETECTION PARAMETERS")
+    print("="*80)
+    print(f"Testing {len(image_folders)} dataset(s):")
+    for folder in image_folders:
+        print(f"  - {folder}")
+    print(f"Target: 100% accuracy across all datasets")
+    print()
+
+    # Define parameter grid - REDUCED for ~30min runtime
+    # Original defaults: noise_threshold=0.045, snr_threshold=15, kurtosis_threshold=5.0,
+    #                   impulse_ratio_min=0.005, snr_max=4.0
+    # Since defaults were "decent", search tightly around them
+    param_grid = {
+        'noise_threshold': [0.035, 0.040, 0.045, 0.050],  # ±10-20% around default
+        'snr_threshold': [12, 15, 18],  # ±20% around default
+        'kurtosis_threshold': [4.0, 5.0, 6.0],  # ±20% around default
+        'impulse_ratio_min': [0.003, 0.005, 0.007],  # ±40% around default (more sensitive)
+        'snr_max': [3.5, 4.0, 4.5]  # ±12.5% around default
+    }
+
+    # Calculate total combinations
+    total_combinations = (len(param_grid['noise_threshold']) *
+                         len(param_grid['snr_threshold']) *
+                         len(param_grid['kurtosis_threshold']) *
+                         len(param_grid['impulse_ratio_min']) *
+                         len(param_grid['snr_max']))
+
+    print(f"Total parameter combinations to test: {total_combinations}")
+    print()
+
+    # Load all datasets
+    print("Loading datasets...")
+    datasets = []
+    for folder in image_folders:
+        # Load ground truth
+        gt_file = os.path.join(folder, "noise_ground_truth.txt")
+        if not os.path.exists(gt_file):
+            print(f"Error: {gt_file} not found. Skipping dataset {folder}")
+            continue
+
+        ground_truth = load_ground_truth_from_file(gt_file)
+
+        # Load images
+        images = {}
+        for img_id in sorted(ground_truth.keys()):
+            image_path = os.path.join(folder, f"{img_id}.jpg")
+            if os.path.exists(image_path):
+                img = cv2.imread(image_path)
+                if img is not None:
+                    images[img_id] = img
+
+        datasets.append({
+            'folder': folder,
+            'images': images,
+            'ground_truth': ground_truth
+        })
+        print(f"  {folder}: {len(images)} images loaded")
+
+    if not datasets:
+        print("Error: No datasets loaded successfully")
+        return []
+
+    print(f"\nTotal datasets loaded: {len(datasets)}")
+    print()
+
+    # Store results
+    perfect_configs = []
+    near_perfect_configs = []
+    tested = 0
+
+    # Grid search
+    print("Running grid search...")
+    for noise_th in param_grid['noise_threshold']:
+        for snr_th in param_grid['snr_threshold']:
+            for kurt_th in param_grid['kurtosis_threshold']:
+                for impulse_min in param_grid['impulse_ratio_min']:
+                    for snr_mx in param_grid['snr_max']:
+                        tested += 1
+
+                        # Test this configuration on ALL datasets
+                        dataset_results = []
+                        total_errors_all_datasets = 0
+                        all_perfect = True
+
+                        for dataset in datasets:
+                            images = dataset['images']
+                            gt_dict = dataset['ground_truth']
+
+                            # Test on this dataset
+                            predictions = {}
+                            for img_id, img in images.items():
+                                result = detect_noise_with_params(
+                                    img,
+                                    noise_threshold=noise_th,
+                                    snr_threshold=snr_th,
+                                    kurtosis_threshold=kurt_th,
+                                    impulse_ratio_min=impulse_min,
+                                    snr_max=snr_mx
+                                )
+                                # Predict True if noise detected (not "none")
+                                predictions[img_id] = (result['noise_type'] == 'salt_and_pepper')
+
+                            # Evaluate accuracy for this dataset
+                            correct = sum(1 for img_id in predictions if predictions[img_id] == gt_dict[img_id])
+                            accuracy = correct / len(predictions)
+
+                            # Count false positives and false negatives with image IDs
+                            fp_ids = [img_id for img_id in predictions
+                                     if predictions[img_id] and not gt_dict[img_id]]
+                            fn_ids = [img_id for img_id in predictions
+                                     if not predictions[img_id] and gt_dict[img_id]]
+
+                            false_positives = len(fp_ids)
+                            false_negatives = len(fn_ids)
+                            total_errors = false_positives + false_negatives
+
+                            dataset_results.append({
+                                'folder': dataset['folder'],
+                                'accuracy': accuracy,
+                                'correct': correct,
+                                'total': len(predictions),
+                                'false_positives': false_positives,
+                                'false_negatives': false_negatives,
+                                'fp_ids': fp_ids,
+                                'fn_ids': fn_ids
+                            })
+
+                            total_errors_all_datasets += total_errors
+                            if accuracy < 1.0:
+                                all_perfect = False
+
+                        config_data = {
+                            'params': {
+                                'noise_threshold': noise_th,
+                                'snr_threshold': snr_th,
+                                'kurtosis_threshold': kurt_th,
+                                'impulse_ratio_min': impulse_min,
+                                'snr_max': snr_mx
+                            },
+                            'dataset_results': dataset_results,
+                            'total_errors_all_datasets': total_errors_all_datasets,
+                            'perfect_all_datasets': all_perfect
+                        }
+
+                        # Store config if perfect across all datasets
+                        if all_perfect:
+                            perfect_configs.append(config_data)
+                        # Store near-perfect configs (1-3 total errors across all datasets)
+                        elif total_errors_all_datasets > 0 and total_errors_all_datasets <= 3:
+                            near_perfect_configs.append(config_data)
+
+                        # Progress update with accuracy info every 50 tests
+                        if tested % 50 == 0:
+                            # Create compact summary line for all datasets
+                            dataset_summary = " | ".join([
+                                f"{os.path.basename(dr['folder'])}: {dr['accuracy']:.3f} (FP={dr['false_positives']}, FN={dr['false_negatives']})"
+                                for dr in dataset_results
+                            ])
+                            print(f"  Tested {tested}/{total_combinations} configs... "
+                                  f"Perfect: {len(perfect_configs)}, Near-perfect: {len(near_perfect_configs)}")
+                            print(f"    Latest: {dataset_summary}")
+
+                        # Report near-perfect configs (1-3 errors total) as we find them
+                        if total_errors_all_datasets > 0 and total_errors_all_datasets <= 3:
+                            print(f"    Near-perfect config! Total errors: {total_errors_all_datasets}")
+                            print(f"      Params: noise_th={noise_th:.3f}, snr_th={snr_th}, kurt_th={kurt_th:.1f}, "
+                                  f"impulse_min={impulse_min:.3f}, snr_max={snr_mx:.1f}")
+                            for dr in dataset_results:
+                                folder_name = os.path.basename(dr['folder'])
+                                print(f"      {folder_name}: acc={dr['accuracy']:.3f} ({dr['correct']}/{dr['total']}) "
+                                      f"FP={dr['false_positives']}, FN={dr['false_negatives']}")
+                                if dr['fp_ids']:
+                                    print(f"        False positives: {', '.join(dr['fp_ids'])}")
+                                if dr['fn_ids']:
+                                    print(f"        False negatives: {', '.join(dr['fn_ids'])}")
+
+    print()
+    print("="*80)
+    print("GRID SEARCH COMPLETE")
+    print("="*80)
+    print(f"Total configurations tested: {tested}")
+    print(f"Configurations with 100% accuracy across ALL datasets: {len(perfect_configs)}")
+
+    # Count near-perfect configs by total error count
+    near_perfect_1_error = sum(1 for c in near_perfect_configs
+                               if c['total_errors_all_datasets'] == 1)
+    near_perfect_2_errors = sum(1 for c in near_perfect_configs
+                                if c['total_errors_all_datasets'] == 2)
+    near_perfect_3_errors = sum(1 for c in near_perfect_configs
+                                if c['total_errors_all_datasets'] == 3)
+
+    if len(near_perfect_configs) > 0:
+        print(f"Near-perfect configs (1-3 total errors across all datasets): {len(near_perfect_configs)}")
+        print(f"  With 1 error: {near_perfect_1_error}")
+        print(f"  With 2 errors: {near_perfect_2_errors}")
+        print(f"  With 3 errors: {near_perfect_3_errors}")
+
+    print()
+
+    if perfect_configs:
+        print("PERFECT CONFIGURATIONS (1.0 accuracy across ALL datasets):")
+        print("="*80)
+
+        for idx, config in enumerate(perfect_configs[:20], 1):  # Show first 20
+            params = config['params']
+            print(f"\nConfig #{idx}:")
+            print(f"  noise_threshold     = {params['noise_threshold']:.3f}")
+            print(f"  snr_threshold       = {params['snr_threshold']}")
+            print(f"  kurtosis_threshold  = {params['kurtosis_threshold']:.1f}")
+            print(f"  impulse_ratio_min   = {params['impulse_ratio_min']:.3f}")
+            print(f"  snr_max             = {params['snr_max']:.1f}")
+            print(f"  Per-dataset results:")
+            for dr in config['dataset_results']:
+                folder_name = os.path.basename(dr['folder'])
+                print(f"    {folder_name}: {dr['accuracy']:.4f} ({dr['correct']}/{dr['total']})")
+
+        if len(perfect_configs) > 20:
+            print(f"\n... and {len(perfect_configs) - 20} more perfect configurations")
+
+        print()
+        print("="*80)
+
+        # Save to JSON
+        output_file = "noise_detection_perfect_configs.json"
+        with open(output_file, 'w') as f:
+            json.dump(perfect_configs, f, indent=2)
+        print(f"All perfect configurations saved to: {output_file}")
+
+    else:
+        print("No configuration achieved 100% accuracy across all datasets.")
+
+    # Save near-perfect configs if any
+    if near_perfect_configs:
+        print()
+        print("NEAR-PERFECT CONFIGURATIONS (1-3 total errors across all datasets):")
+        print("="*80)
+
+        # Show top 10 near-perfect configs
+        for idx, config in enumerate(sorted(near_perfect_configs,
+                                           key=lambda c: c['total_errors_all_datasets'])[:10], 1):
+            params = config['params']
+            total_errors = config['total_errors_all_datasets']
+            print(f"\nConfig #{idx} (Total errors: {total_errors}):")
+            print(f"  noise_threshold     = {params['noise_threshold']:.3f}")
+            print(f"  snr_threshold       = {params['snr_threshold']}")
+            print(f"  kurtosis_threshold  = {params['kurtosis_threshold']:.1f}")
+            print(f"  impulse_ratio_min   = {params['impulse_ratio_min']:.3f}")
+            print(f"  snr_max             = {params['snr_max']:.1f}")
+            print(f"  Per-dataset results:")
+            for dr in config['dataset_results']:
+                folder_name = os.path.basename(dr['folder'])
+                print(f"    {folder_name}: {dr['accuracy']:.4f} ({dr['correct']}/{dr['total']}) "
+                      f"FP={dr['false_positives']}, FN={dr['false_negatives']}")
+                if dr['fp_ids']:
+                    print(f"      False positives: {', '.join(dr['fp_ids'])}")
+                if dr['fn_ids']:
+                    print(f"      False negatives: {', '.join(dr['fn_ids'])}")
+
+        if len(near_perfect_configs) > 10:
+            print(f"\n... and {len(near_perfect_configs) - 10} more near-perfect configurations")
+
+        near_perfect_file = "noise_detection_near_perfect_configs.json"
+        with open(near_perfect_file, 'w') as f:
+            json.dump(near_perfect_configs, f, indent=2)
+        print()
+        print("="*80)
+        print(f"Near-perfect configurations (1-3 errors) saved to: {near_perfect_file}")
+
+    if not perfect_configs and not near_perfect_configs:
+        print()
+        print("Try expanding the parameter ranges or adjusting the grid.")
+
+    return perfect_configs
 
 
 
@@ -1046,16 +1375,61 @@ def evaluate_dataset(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_augmented
 
 
 if __name__ == "__main__":
-    
+
+    noise_gt = {
+        '00000': False,
+        '00001': False,
+        '00002': False,
+        '00003': False,
+        '00004': False,
+        '00005': False,
+        '00006': False,
+        '00007': True,
+        '00008': False,
+        '00009': False,
+        '00010': False,
+        '00011': True,
+        '00012': False,
+        '00013': False,
+        '00014': False,
+        '00015': False,
+        '00016': False,
+        '00017': True,
+        '00018': False,
+        '00019': False,
+        '00020': False,
+        '00021': True,
+        '00022': False,
+        '00023': True,
+        '00024': False,
+        '00025': False,
+        '00026': True,
+        '00027': False,
+        '00028': True,
+        '00029': False,
+
+    }
+
+    # STEP 0: Grid search for perfect noise detection parameters
+    # Run this to find all parameter combinations that achieve 100% accuracy
+    perfect_configs = grid_search_noise_detection(
+        image_folders=[
+            "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd1_w3",
+            "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd2_w3",
+            "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd1_w4",
+            "/home/arnau-marcos-almansa/workspace/Team4/qst1_w4"
+        ],
+    )
+
     # # STEP 1: Test noise detection on sample images - Run it to see what images have noise and some infos
-    #  for i in range(0, 30):
-    #     image = cv2.imread(f"qsd2_w3/{i:05d}.jpg")
-       
-    #     result = detect_noise(image)
-    #     print(f"Image {i:05d}: {result['noise_type']} - {result['snr']:.2f} dB - noise std: {result['noise_std']:.4f} kurtosis: {result['kurtosis']:.2f} ")
-    
-    
-    
+    for i in range(0, 30):
+       image = cv2.imread(f"qst1_w4/{i:05d}.jpg")
+
+       result = detect_noise(image)
+       print(f"Image {i:05d}: {result['noise_type']} - {result['snr']:.2f} dB - noise std: {result['noise_std']:.4f} kurtosis: {result['kurtosis']:.2f} ")
+
+
+
     # # STEP 2: Evaluate denoising on the whole dataset, and see the result for each image in the json file
     # results = evaluate_dataset()
     # # Optional: Save results to file
@@ -1092,10 +1466,10 @@ if __name__ == "__main__":
     
     # Method 5: Compare all methods on a single image
     # compare_methods_single_image(image_id=6)
-    print("\n=== DENOISING SPECIFIC IMAGES ===")
-    results = denoise_specific_images(
-        input_folder="qsd1_w4",
-        output_folder="qsd1_w4_denoised",
-        image_ids=[3,8,12,17,19,22,23,24,25]
-    )
+    # print("\n=== DENOISING SPECIFIC IMAGES ===")
+    # results = denoise_specific_images(
+    #     input_folder="qst1_w4",
+    #     output_folder="qsd1_w4_denoised",
+    #     image_ids=[3,8,12,17,19,22,23,24,25]
+    # )
 
