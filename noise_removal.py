@@ -7,6 +7,7 @@ from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import mean_squared_error as mse
 import json
+from datetime import datetime
 
 
 
@@ -992,17 +993,18 @@ def grid_search_noise_detection(image_folders=None):
     print(f"Target: 100% accuracy across all datasets")
     print()
 
-    # Define parameter grid - REDUCED for ~30min runtime
-    # Original defaults: noise_threshold=0.045, snr_threshold=15, kurtosis_threshold=5.0,
-    #                   impulse_ratio_min=0.005, snr_max=4.0
-    # Since defaults were "decent", search tightly around them
+    # Define parameter grid - REFINED based on initial results
+    # Best configs had: noise_threshold=0.050, snr_threshold=12, snr_max=4.5
+    # These parameters increase sensitivity to avoid false negatives (missing noisy images)
+    # Expanding in the direction that makes detection MORE sensitive
     param_grid = {
-        'noise_threshold': [0.035, 0.040, 0.045, 0.050],  # ±10-20% around default
-        'snr_threshold': [12, 15, 18],  # ±20% around default
-        'kurtosis_threshold': [4.0, 5.0, 6.0],  # ±20% around default
-        'impulse_ratio_min': [0.003, 0.005, 0.007],  # ±40% around default (more sensitive)
-        'snr_max': [3.5, 4.0, 4.5]  # ±12.5% around default
+        'noise_threshold': [0.045, 0.050, 0.055, 0.060],  # Higher = more sensitive (expand upward)
+        'snr_threshold': [10, 11, 12],  # Lower = more sensitive (expand downward)
+        'kurtosis_threshold': [3.5, 4.0, 5.0, 6.0],  # Keep broad range
+        'impulse_ratio_min': [0.002, 0.003, 0.005, 0.007],  # Lower = more sensitive
+        'snr_max': [4.0, 4.5, 5.0, 5.5]  # Higher = more sensitive (expand upward)
     }
+    # Total: 4 * 3 * 4 * 4 * 4 = 768 combinations (~20-30 min runtime)
 
     # Calculate total combinations
     total_combinations = (len(param_grid['noise_threshold']) *
@@ -1053,6 +1055,10 @@ def grid_search_noise_detection(image_folders=None):
     perfect_configs = []
     near_perfect_configs = []
     tested = 0
+
+    # Track per-image failure statistics across all configs
+    # Key: (dataset_folder, image_id), Value: {'fp_count': int, 'fn_count': int}
+    image_failure_stats = {}
 
     # Grid search
     print("Running grid search...")
@@ -1115,6 +1121,23 @@ def grid_search_noise_detection(image_folders=None):
                             if accuracy < 1.0:
                                 all_perfect = False
 
+                            # Track per-image failures
+                            for fp_id in fp_ids:
+                                key = (dataset['folder'], fp_id)
+                                if key not in image_failure_stats:
+                                    image_failure_stats[key] = {'fp_count': 0, 'fn_count': 0}
+                                image_failure_stats[key]['fp_count'] += 1
+
+                            for fn_id in fn_ids:
+                                key = (dataset['folder'], fn_id)
+                                if key not in image_failure_stats:
+                                    image_failure_stats[key] = {'fp_count': 0, 'fn_count': 0}
+                                image_failure_stats[key]['fn_count'] += 1
+
+                        # Calculate total FP and FN across all datasets
+                        total_fp = sum(dr['false_positives'] for dr in dataset_results)
+                        total_fn = sum(dr['false_negatives'] for dr in dataset_results)
+
                         config_data = {
                             'params': {
                                 'noise_threshold': noise_th,
@@ -1125,6 +1148,8 @@ def grid_search_noise_detection(image_folders=None):
                             },
                             'dataset_results': dataset_results,
                             'total_errors_all_datasets': total_errors_all_datasets,
+                            'total_false_positives': total_fp,
+                            'total_false_negatives': total_fn,
                             'perfect_all_datasets': all_perfect
                         }
 
@@ -1132,17 +1157,22 @@ def grid_search_noise_detection(image_folders=None):
                         if all_perfect:
                             perfect_configs.append(config_data)
                         # Store near-perfect configs (1-3 total errors across all datasets)
-                        elif total_errors_all_datasets > 0 and total_errors_all_datasets <= 3:
+                        # Also accept more errors if they're only false positives (better than FN)
+                        elif total_errors_all_datasets > 0 and (
+                            total_errors_all_datasets <= 3 or  # 1-3 total errors
+                            (total_fn == 0 and total_fp <= 5)  # Up to 5 FP is acceptable if no FN
+                        ):
                             near_perfect_configs.append(config_data)
 
-                        # Progress update with accuracy info every 50 tests
-                        if tested % 50 == 0:
+                        # Progress update with accuracy info every 1 test
+                        if tested % 1 == 0:
                             # Create compact summary line for all datasets
                             dataset_summary = " | ".join([
                                 f"{os.path.basename(dr['folder'])}: {dr['accuracy']:.3f} (FP={dr['false_positives']}, FN={dr['false_negatives']})"
                                 for dr in dataset_results
                             ])
-                            print(f"  Tested {tested}/{total_combinations} configs... "
+                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            print(f"  [{timestamp}] Tested {tested}/{total_combinations} configs... "
                                   f"Perfect: {len(perfect_configs)}, Near-perfect: {len(near_perfect_configs)}")
                             print(f"    Latest: {dataset_summary}")
 
@@ -1167,20 +1197,46 @@ def grid_search_noise_detection(image_folders=None):
     print(f"Total configurations tested: {tested}")
     print(f"Configurations with 100% accuracy across ALL datasets: {len(perfect_configs)}")
 
-    # Count near-perfect configs by total error count
-    near_perfect_1_error = sum(1 for c in near_perfect_configs
-                               if c['total_errors_all_datasets'] == 1)
-    near_perfect_2_errors = sum(1 for c in near_perfect_configs
-                                if c['total_errors_all_datasets'] == 2)
-    near_perfect_3_errors = sum(1 for c in near_perfect_configs
-                                if c['total_errors_all_datasets'] == 3)
+    # Count near-perfect configs by error type (FN is worse than FP)
+    configs_0fn = [c for c in near_perfect_configs if c['total_false_negatives'] == 0]
+    configs_1fn = [c for c in near_perfect_configs if c['total_false_negatives'] == 1]
+    configs_2fn = [c for c in near_perfect_configs if c['total_false_negatives'] == 2]
+    configs_3plus_fn = [c for c in near_perfect_configs if c['total_false_negatives'] >= 3]
 
     if len(near_perfect_configs) > 0:
-        print(f"Near-perfect configs (1-3 total errors across all datasets): {len(near_perfect_configs)}")
-        print(f"  With 1 error: {near_perfect_1_error}")
-        print(f"  With 2 errors: {near_perfect_2_errors}")
-        print(f"  With 3 errors: {near_perfect_3_errors}")
+        print(f"\nNear-perfect configs: {len(near_perfect_configs)}")
+        print(f"  With 0 FN (only FP): {len(configs_0fn)}")
+        print(f"  With 1 FN: {len(configs_1fn)}")
+        print(f"  With 2 FN: {len(configs_2fn)}")
+        print(f"  With 3+ FN: {len(configs_3plus_fn)}")
 
+    # Per-image failure analysis
+    if image_failure_stats:
+        print()
+        print("="*80)
+        print("PER-IMAGE FAILURE ANALYSIS")
+        print("="*80)
+        print(f"Images that failed in at least one configuration:")
+        print()
+
+        # Sort by total failures (FN + FP), prioritizing FN
+        sorted_failures = sorted(
+            image_failure_stats.items(),
+            key=lambda x: (x[1]['fn_count'] + x[1]['fp_count'], x[1]['fn_count']),
+            reverse=True
+        )
+
+        for (folder, img_id), stats in sorted_failures:
+            folder_name = os.path.basename(folder)
+            total_fails = stats['fp_count'] + stats['fn_count']
+            fail_rate = (total_fails / tested) * 100
+            print(f"  {folder_name}/{img_id}:")
+            print(f"    False negatives: {stats['fn_count']}/{tested} ({stats['fn_count']/tested*100:.1f}%)")
+            print(f"    False positives: {stats['fp_count']}/{tested} ({stats['fp_count']/tested*100:.1f}%)")
+            print(f"    Total failures:  {total_fails}/{tested} ({fail_rate:.1f}%)")
+
+    print()
+    print("="*80)
     print()
 
     if perfect_configs:
@@ -1218,15 +1274,26 @@ def grid_search_noise_detection(image_folders=None):
     # Save near-perfect configs if any
     if near_perfect_configs:
         print()
-        print("NEAR-PERFECT CONFIGURATIONS (1-3 total errors across all datasets):")
+        print("NEAR-PERFECT CONFIGURATIONS:")
         print("="*80)
+        print("Sorted by: FN count (lower is better), then FP count, then total errors")
+        print()
 
-        # Show top 10 near-perfect configs
-        for idx, config in enumerate(sorted(near_perfect_configs,
-                                           key=lambda c: c['total_errors_all_datasets'])[:10], 1):
+        # Sort by priority: FN count (ascending), then FP count, then total errors
+        # This ensures configs with fewer FN appear first (FN is worse than FP)
+        sorted_configs = sorted(
+            near_perfect_configs,
+            key=lambda c: (c['total_false_negatives'], c['total_false_positives'], c['total_errors_all_datasets'])
+        )
+
+        # Show ALL near-perfect configs (no truncation)
+        for idx, config in enumerate(sorted_configs, 1):
             params = config['params']
             total_errors = config['total_errors_all_datasets']
-            print(f"\nConfig #{idx} (Total errors: {total_errors}):")
+            total_fn = config['total_false_negatives']
+            total_fp = config['total_false_positives']
+
+            print(f"\nConfig #{idx} (Errors: {total_errors} total, {total_fn} FN, {total_fp} FP):")
             print(f"  noise_threshold     = {params['noise_threshold']:.3f}")
             print(f"  snr_threshold       = {params['snr_threshold']}")
             print(f"  kurtosis_threshold  = {params['kurtosis_threshold']:.1f}")
@@ -1241,9 +1308,6 @@ def grid_search_noise_detection(image_folders=None):
                     print(f"      False positives: {', '.join(dr['fp_ids'])}")
                 if dr['fn_ids']:
                     print(f"      False negatives: {', '.join(dr['fn_ids'])}")
-
-        if len(near_perfect_configs) > 10:
-            print(f"\n... and {len(near_perfect_configs) - 10} more near-perfect configurations")
 
         near_perfect_file = "noise_detection_near_perfect_configs.json"
         with open(near_perfect_file, 'w') as f:
