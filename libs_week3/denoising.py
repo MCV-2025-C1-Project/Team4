@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+from scipy import stats
+
 from libs_week3.preprocessing import ImagePreprocessStep
 
 def detect_noise(image, noise_threshold=0.045):
