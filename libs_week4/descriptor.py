@@ -1041,9 +1041,10 @@ class MatchRatioScorer(Scorer):
     WARNING: This will favor database images with many keypoints.
     Use as a baseline to verify that geometric verification adds value.
     """
-    def __init__(self, matcher: DescriptorMatcher, min_matches: int = 10):
+    def __init__(self, matcher: DescriptorMatcher, min_matches: int = 10, min_score: float = 0.5):
         super().__init__(matcher)
         self.min_matches = min_matches
+        self.min_score = min_score
 
     def score(self, query_image: np.ndarray, query_keypoints, query_descriptors,
               database_image: np.ndarray, database_keypoints, database_descriptors):
@@ -1070,7 +1071,7 @@ class MatchRatioScorer(Scorer):
             "match_ratio": float(match_ratio)
         }
 
-        return True, float(match_ratio), info
+        return float(match_ratio) > self.min_score, float(match_ratio), info
 
     def to_dict(self) -> dict:
         d = super().to_dict()
@@ -1086,9 +1087,10 @@ class SymmetricMatchRatioScorer(Scorer):
     This is the symmetric normalization suggested in the FIXME comment.
     Prevents database images with excessive keypoints from dominating.
     """
-    def __init__(self, matcher: DescriptorMatcher, min_matches: int = 10):
+    def __init__(self, matcher: DescriptorMatcher, min_matches: int = 10, min_score: float = 0.5):
         super().__init__(matcher)
         self.min_matches = min_matches
+        self.min_score = min_score
 
     def score(self, query_image: np.ndarray, query_keypoints, query_descriptors,
               database_image: np.ndarray, database_keypoints, database_descriptors):
@@ -1117,7 +1119,7 @@ class SymmetricMatchRatioScorer(Scorer):
             "normalization_factor": float(normalization_factor)
         }
 
-        return True, float(symmetric_ratio), info
+        return float(symmetric_ratio) > self.min_score, float(symmetric_ratio), info
 
     def to_dict(self) -> dict:
         d = super().to_dict()
@@ -1207,7 +1209,7 @@ class HomographyDistanceScorer(Scorer):
 
         # Combined score: geometric quality * distance consistency
         geometric_score = inlier_ratio
-        score = geometric_score * (1.0 - self.distance_weight + self.distance_weight * distance_consistency)
+        score = geometric_score * (1.0 - self.distance_weight) + (self.distance_weight * distance_consistency)
 
         info = {
             "n_inliers": int(n_inliers),

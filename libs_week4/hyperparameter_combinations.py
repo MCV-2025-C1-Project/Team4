@@ -67,6 +67,15 @@ def generate_sift_configs() -> Iterator[Dict[str, Any]]:
         'sigma': [1.6],
         'edge_threshold': [15]
     }
+
+    param_grid = {
+        'n_features': [1000, 1500, 2000],
+        'n_octave_layers': [4],
+        'contrast_threshold': [0.03, 0.04],
+        'sigma': [1.6, 2.0],
+        'edge_threshold': [15]
+    }
+
     # Total: 1 config (not used)
     keys, values = zip(*param_grid.items())
     for v in itertools.product(*values):
@@ -234,6 +243,7 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     - PCA-SIFT: 4 configs (exploratory with proper fitting)
     Total: 22 descriptor configs (down from 104)
     """
+    """
     # ORB: Best performer - fast and accurate
     for config in generate_orb_configs():
         yield ORBDescriptor(**config)
@@ -245,6 +255,7 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     # PCA-SIFT: Exploratory - now with proper database-wide PCA fitting
     for config in generate_pcasift_configs():
         yield PCASIFTDescriptor(**config)
+    """
 
     # === DISCARDED DESCRIPTORS (from ranking analysis) ===
 
@@ -341,17 +352,22 @@ def generate_alternative_scorers(descriptor_maker: KeypointAndDescriptorMaker) -
         cross_check=False
     )
 
-    # Config 1: Simple Match Ratio (baseline - no homography)
-    yield {
-        'matcher': matcher,
-        'scorer': MatchRatioScorer(matcher, min_matches=10)
-    }
+    # Test min_score parameter: [0.4, 0.5, 0.6]
+    min_score_values = [0.4, 0.5, 0.6]
 
-    # Config 2: Symmetric Match Ratio (normalized baseline)
-    yield {
-        'matcher': matcher,
-        'scorer': SymmetricMatchRatioScorer(matcher, min_matches=10)
-    }
+    # Config 1: Simple Match Ratio (baseline - no homography) with min_score tuning
+    for min_score in min_score_values:
+        yield {
+            'matcher': matcher,
+            'scorer': MatchRatioScorer(matcher, min_matches=10, min_score=min_score)
+        }
+
+    # Config 2: Symmetric Match Ratio (normalized baseline) with min_score tuning
+    for min_score in min_score_values:
+        yield {
+            'matcher': matcher,
+            'scorer': SymmetricMatchRatioScorer(matcher, min_matches=10, min_score=min_score)
+        }
 
     # Config 3: Homography + Distance Consistency (light weight)
     yield {
