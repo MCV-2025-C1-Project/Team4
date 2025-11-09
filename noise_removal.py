@@ -1090,7 +1090,7 @@ def grid_search_noise_detection(image_folders=None):
                                     snr_max=snr_mx
                                 )
                                 # Predict True if noise detected (not "none")
-                                predictions[img_id] = (result['noise_type'] == 'salt_and_pepper')
+                                predictions[img_id] = (result['noise_type'] != 'none')
 
                             # Evaluate accuracy for this dataset
                             correct = sum(1 for img_id in predictions if predictions[img_id] == gt_dict[img_id])
@@ -1323,6 +1323,109 @@ def grid_search_noise_detection(image_folders=None):
     return perfect_configs
 
 
+def detect_and_denoise_folder(input_folder, output_folder,
+                               noise_threshold=0.050, snr_threshold=10,
+                               kurtosis_threshold=3.5, impulse_ratio_min=0.002,
+                               snr_max=4.5, denoise_method='median', kernel_size=3):
+    """
+    Detect and denoise all images in a folder.
+
+    Args:
+        input_folder: Path to folder containing input images (JPEG format)
+        output_folder: Path to folder where processed images will be saved
+        noise_threshold: Noise detection threshold (default: 0.050)
+        snr_threshold: SNR threshold for noise detection (default: 10)
+        kurtosis_threshold: Kurtosis threshold for noise detection (default: 3.5)
+        impulse_ratio_min: Minimum impulse ratio for noise detection (default: 0.002)
+        snr_max: Maximum SNR for noise detection (default: 4.5)
+        denoise_method: Denoising method to use (default: 'median')
+        kernel_size: Kernel size for median filter (default: 3)
+
+    Returns:
+        Dictionary with statistics: total_images, noisy_images, clean_images
+    """
+    # Create output folder if it doesn't exist
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Get list of image files
+    image_files = sorted([f for f in os.listdir(input_folder) if f.endswith('.jpg') or f.endswith('.jpeg')])
+
+    if not image_files:
+        print(f"No JPEG images found in {input_folder}")
+        return {'total_images': 0, 'noisy_images': 0, 'clean_images': 0}
+
+    print("="*80)
+    print("DETECT AND DENOISE")
+    print("="*80)
+    print(f"Input folder:  {input_folder}")
+    print(f"Output folder: {output_folder}")
+    print(f"Total images:  {len(image_files)}")
+    print()
+    print("Detection parameters:")
+    print(f"  noise_threshold     = {noise_threshold}")
+    print(f"  snr_threshold       = {snr_threshold}")
+    print(f"  kurtosis_threshold  = {kurtosis_threshold}")
+    print(f"  impulse_ratio_min   = {impulse_ratio_min}")
+    print(f"  snr_max             = {snr_max}")
+    print()
+    print(f"Denoising: {denoise_method} filter with kernel_size={kernel_size}")
+    print()
+    print("="*80)
+    print()
+
+    stats = {'total_images': 0, 'noisy_images': 0, 'clean_images': 0}
+
+    for img_file in image_files:
+        input_path = os.path.join(input_folder, img_file)
+        output_path = os.path.join(output_folder, img_file)
+
+        # Read image
+        img = cv2.imread(input_path)
+        if img is None:
+            print(f"{img_file}: Error reading image, skipping")
+            continue
+
+        stats['total_images'] += 1
+
+        # Detect noise
+        detection_result = detect_noise_with_params(
+            img,
+            noise_threshold=noise_threshold,
+            snr_threshold=snr_threshold,
+            kurtosis_threshold=kurtosis_threshold,
+            impulse_ratio_min=impulse_ratio_min,
+            snr_max=snr_max
+        )
+
+        noise_detected = (detection_result['noise_type'] == 'salt_and_pepper')
+
+        if noise_detected:
+            stats['noisy_images'] += 1
+            # Apply denoising
+            if denoise_method == 'median':
+                denoised_img = apply_median_filter(img, kernel_size=kernel_size)
+            else:
+                denoised_img = remove_noise(img, 'salt_and_pepper', method=denoise_method)
+
+            # Save denoised image
+            cv2.imwrite(output_path, denoised_img)
+            print(f"{img_file}: Noise detected - applied {denoise_method} filter (kernel_size={kernel_size})")
+        else:
+            stats['clean_images'] += 1
+            # Save original image (no noise detected)
+            cv2.imwrite(output_path, img)
+            print(f"{img_file}: No noise detected - saved original")
+
+    print()
+    print("="*80)
+    print("SUMMARY")
+    print("="*80)
+    print(f"Total images processed: {stats['total_images']}")
+    print(f"Noisy images (denoised): {stats['noisy_images']}")
+    print(f"Clean images (original): {stats['clean_images']}")
+    print()
+
+    return stats
 
 
 def remove_noise(image, noise_type, method='median'):
@@ -1440,6 +1543,10 @@ def evaluate_dataset(noisy_folder="qsd1_w3", clean_folder="qsd1_w3/non_augmented
 
 if __name__ == "__main__":
 
+    # detect_and_denoise_folder("/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qst1_w4", "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qst1_w4_denoised")
+    #
+    # exit()
+
     noise_gt = {
         '00000': False,
         '00001': False,
@@ -1481,7 +1588,7 @@ if __name__ == "__main__":
             "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd1_w3",
             "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd2_w3",
             "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd1_w4",
-            "/home/arnau-marcos-almansa/workspace/Team4/qst1_w4"
+            # "/media/arnau-marcos-almansa/Ubuntu Data/MCV/C1/qsd1_w4_noiseproblem"
         ],
     )
 
