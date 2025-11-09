@@ -71,7 +71,7 @@ def generate_split_pipeline_configurations_extended() -> Iterator[dict]:
                         'split_thresh': split_thresh,
                         'split_valley_frac': split_valley_frac,
                     }
-
+    """
     # === 2. ASPECT RATIO DETECTOR + VARIOUS SPLITTERS (EXPANDED) ===
     aspect_h_ratios = [1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0]
     aspect_v_ratios = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80]
@@ -243,6 +243,7 @@ def generate_split_pipeline_configurations_extended() -> Iterator[dict]:
                 'canny_low': canny_low,
                 'canny_high': canny_high,
             }
+    """
 
 
 def quick_split_detection_check(split_predictions: dict[str, SplitCase],
