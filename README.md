@@ -15,7 +15,8 @@ Week 4 introduces **keypoint-based descriptors** for image matching, transitioni
 
 See [`query_by_sample.py`](#main-script-query_by_samplepy-week-4) for the main Week 4 script and [`libs_week4/`](#core-library-libs_week4) for implementation details.
 
-Final presentation:[Slides link](https://docs.google.com/presentation/d/1-dzYacbGVDKyQR7x3ZBHYJwrAK_Wy8d3cXOw-Ck6wKY/edit?usp=sharing)
+### Final presentation
+[Slides link](https://docs.google.com/presentation/d/1-dzYacbGVDKyQR7x3ZBHYJwrAK_Wy8d3cXOw-Ck6wKY/edit?usp=sharing)
 ## Installation
 
 1. Clone the repository or download the files.
