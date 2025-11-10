@@ -232,6 +232,56 @@ def generate_pcasift_configs() -> Iterator[Dict[str, Any]]:
         yield dict(zip(keys, v))
 
 
+def generate_rootsift_configs_minimal() -> Iterator[Dict[str, Any]]:
+    """
+    MINIMAL GRID (6 configs): For testing MatchRatioScorer and SymmetricMatchRatioScorer
+
+    Based on ranking analysis showing RootSIFT dominates with mAP@k1=0.948718
+    All top results use ratio_test_threshold=0.65 and similar parameters.
+
+    Testing 6 combinations covering the best parameter space.
+    """
+    # Top 2: Best performers from ranking
+    yield {'n_features': 2000, 'n_octave_layers': 4, 'contrast_threshold': 0.03, 'edge_threshold': 15, 'sigma': 2.0}
+    yield {'n_features': 1500, 'n_octave_layers': 4, 'contrast_threshold': 0.03, 'edge_threshold': 15, 'sigma': 1.6}
+
+    # Next 2: Variations with n_features=1000 (faster, still good)
+    yield {'n_features': 1000, 'n_octave_layers': 4, 'contrast_threshold': 0.04, 'edge_threshold': 15, 'sigma': 2.0}
+    yield {'n_features': 1000, 'n_octave_layers': 4, 'contrast_threshold': 0.03, 'edge_threshold': 15, 'sigma': 1.6}
+
+    # Last 2: Alternative contrast threshold
+    yield {'n_features': 1500, 'n_octave_layers': 4, 'contrast_threshold': 0.04, 'edge_threshold': 15, 'sigma': 1.6}
+    yield {'n_features': 2000, 'n_octave_layers': 4, 'contrast_threshold': 0.03, 'edge_threshold': 15, 'sigma': 1.6}
+
+
+def generate_orb_configs_minimal() -> Iterator[Dict[str, Any]]:
+    """
+    MINIMAL GRID (2 configs): Best ORB configurations for ratio-based scorers
+
+    ORB performs well with MatchRatioScorer because it generates consistent matches.
+    Testing the 2 best configurations from previous experiments.
+    """
+    # Best: n_features=3000, scale_factor=1.2 (from previous ranking)
+    yield {
+        'n_features': 3000,
+        'scale_factor': 1.2,
+        'n_levels': 10,
+        'wta_k': 2,
+        'score_type': cv2.ORB_HARRIS_SCORE,
+        'patch_size': 31
+    }
+
+    # Alternative: n_features=2500 (balanced speed/accuracy)
+    yield {
+        'n_features': 2500,
+        'scale_factor': 1.2,
+        'n_levels': 10,
+        'wta_k': 2,
+        'score_type': cv2.ORB_HARRIS_SCORE,
+        'patch_size': 31
+    }
+
+
 def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     """
     Generates instances of different keypoint descriptors by iterating
@@ -243,7 +293,7 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     - PCA-SIFT: 4 configs (exploratory with proper fitting)
     Total: 22 descriptor configs (down from 104)
     """
-    """
+
     # ORB: Best performer - fast and accurate
     for config in generate_orb_configs():
         yield ORBDescriptor(**config)
@@ -255,13 +305,13 @@ def generate_keypoint_descriptors() -> Iterator[DescriptorComputer]:
     # PCA-SIFT: Exploratory - now with proper database-wide PCA fitting
     for config in generate_pcasift_configs():
         yield PCASIFTDescriptor(**config)
-    """
+
 
     # === DISCARDED DESCRIPTORS (from ranking analysis) ===
 
     # SIFT: Consistently worse than RootSIFT (0.59-0.64 vs 0.69-0.77)
-    # for config in generate_sift_configs():
-    #     yield SIFTDescriptor(**config)
+    for config in generate_sift_configs():
+        yield SIFTDescriptor(**config)
 
     # KAZE: Too slow (455-544s) + poor performance (0.46-0.54) + too many keypoints (5k-24k)
     # for config in generate_kaze_configs():
@@ -312,12 +362,34 @@ def descriptor_maker_grid_search() -> Iterator[KeypointAndDescriptorMaker]:
     """
     for color_spaces in generate_color_space_combinations():
         for preprocess in generate_preprocess_strategies():
-            for descriptor in generate_keypoint_descriptors():
+            for descriptor in generate_keypoint_descriptors_minimal():
                 yield KeypointAndDescriptorMaker(
                     descriptor_computer=descriptor,
                     color_conversion=ColorConversion(targets=color_spaces, normalize=True),
                     preprocess=preprocess
                 )
+
+
+def generate_keypoint_descriptors_minimal() -> Iterator[DescriptorComputer]:
+    """
+    MINIMAL GRID (8 configs): For testing MatchRatioScorer and SymmetricMatchRatioScorer
+
+    Based on latest ranking showing RootSIFT dominates (mAP@k1=0.948718).
+
+    Composition:
+    - 6 RootSIFT configs (best overall performer)
+    - 2 ORB configs (good baseline, fast)
+
+    Total: 8 descriptor configurations
+    """
+    # RootSIFT: 6 configs covering best parameter space
+    for config in generate_rootsift_configs_minimal():
+        yield RootSIFTDescriptor(**config)
+
+    # ORB: 2 configs for diversity
+    for config in generate_orb_configs_minimal():
+        yield ORBDescriptor(**config)
+
 
 def generate_alternative_scorers(descriptor_maker: KeypointAndDescriptorMaker) -> Iterator[Dict[str, Any]]:
     """
@@ -353,7 +425,7 @@ def generate_alternative_scorers(descriptor_maker: KeypointAndDescriptorMaker) -
     )
 
     # Test min_score parameter: [0.4, 0.5, 0.6]
-    min_score_values = [0.4, 0.5, 0.6]
+    min_score_values = [0.1, 0.2]
 
     # Config 1: Simple Match Ratio (baseline - no homography) with min_score tuning
     for min_score in min_score_values:
@@ -370,28 +442,28 @@ def generate_alternative_scorers(descriptor_maker: KeypointAndDescriptorMaker) -
         }
 
     # Config 3: Homography + Distance Consistency (light weight)
-    yield {
-        'matcher': matcher,
-        'scorer': HomographyDistanceScorer(
-            matcher,
-            ransac_thresh=3.0,
-            max_reproj_error=3.0,
-            min_points=20,
-            distance_weight=0.2  # Light emphasis on distance consistency
-        )
-    }
+    # yield {
+    #     'matcher': matcher,
+    #     'scorer': HomographyDistanceScorer(
+    #         matcher,
+    #         ransac_thresh=3.0,
+    #         max_reproj_error=3.0,
+    #         min_points=20,
+    #         distance_weight=0.2  # Light emphasis on distance consistency
+    #     )
+    # }
 
     # Config 4: Homography + Distance Consistency (moderate weight)
-    yield {
-        'matcher': matcher,
-        'scorer': HomographyDistanceScorer(
-            matcher,
-            ransac_thresh=3.0,
-            max_reproj_error=3.0,
-            min_points=20,
-            distance_weight=0.4  # More emphasis on distance consistency
-        )
-    }
+    # yield {
+    #     'matcher': matcher,
+    #     'scorer': HomographyDistanceScorer(
+    #         matcher,
+    #         ransac_thresh=3.0,
+    #         max_reproj_error=3.0,
+    #         min_points=20,
+    #         distance_weight=0.4  # More emphasis on distance consistency
+    #     )
+    # }
 
     # NOTE: MultiFactorScorer is implemented but commented out for later exploration
     # It requires more extensive tuning of weights (inlier, reproj, distance)
@@ -555,6 +627,8 @@ def scorer_grid_search(descriptor_maker: KeypointAndDescriptorMaker, include_alt
             min_points=config['min_points']
         )
 
+        continue
+
         yield {
             'matcher': matcher,
             'scorer': scorer
@@ -603,7 +677,7 @@ if __name__ == '__main__':
 
         print(f"\nSCORER CONFIGURATIONS PER DESCRIPTOR MAKER: {num_scorer_configs}")
         print(f"  - Ratio test thresholds: 3 (0.7, 0.75, 0.8)")
-        print(f"  - Homography scorer params: {len(list(generate_homography_scorer_configs()))}")
+        print(f"  - Homography scorer params: {len(list(scorer_grid_search(descriptor_makers[0], include_alternative_scorers=True)))}")
 
         print(f"\nTOTAL COMBINATIONS: {num_descriptor_makers} × {num_scorer_configs} = {num_descriptor_makers * num_scorer_configs}")
         print("\nNOTE: With the new split approach:")
