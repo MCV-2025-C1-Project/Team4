@@ -1,6 +1,19 @@
 # TEAM 4
 
-This project provides scripts for content-based image retrieval using color histograms and various distance metrics. Follow the instructions below to set up and execute the code.
+This project provides scripts for content-based image retrieval using both global (histogram-based) and local (keypoint-based) descriptors.
+
+## Week 4 - Keypoint-Based Image Retrieval
+
+Week 4 introduces **keypoint-based descriptors** for image matching, transitioning from global histogram methods to local feature detection and matching:
+
+- **Keypoint Descriptors**: RootSIFT, SIFT, ORB, BRISK, KAZE, AKAZE, SURF, and more
+- **Feature Matching**: BruteForce and FLANN-based matchers with ratio test filtering
+- **Geometric Verification**: Homography-based scoring using RANSAC
+- **Multiple Painting Detection**: Automatic splitting of images containing multiple artworks
+- **Mask Generation**: Variance-based background removal (HSV S+V channels)
+- **Visualization**: Interactive and saved visualizations of query results
+
+See [`query_by_sample.py`](#main-script-query_by_samplepy-week-4) for the main Week 4 script and [`libs_week4/`](#core-library-libs_week4) for implementation details.
 
 ## Installation
 
@@ -15,9 +28,9 @@ uv pip install -r requirements.txt
 
 ## Usage
 
-### Main Script: `query_by_sample.py`
+### Main Script: `query_by_sample.py` (Week 4)
 
-This is the main script for querying images with advanced options.
+This is the main script for querying images using keypoint-based descriptors (RootSIFT).
 
 ```bash
 python query_by_sample.py dataset_path queries_path [params]
@@ -31,43 +44,46 @@ python query_by_sample.py dataset_path queries_path [params]
 - `queries_path`
   Path to the queries directory. **(Required, positional argument)**
 
-- `--color_spaces`
-  Color space(s) to use. Options: `RGB`, `HSV`, `LAB`, `YCRCB`, `HLS`, `CMYK`, `LUV`, `XYZ`, `YUV`. Default: `LAB`.
-
-- `--distance`
-  Distance function to use (e.g., `canberra_distance`, `l1_distance`, `euclidean_distance`). Default: `canberra_distance`.
-
-- `--generate_masks`
-  If present, indicates that it has to generate masks per each query image instead of using the full image.
-
-- `--multiple_paintings`
-  If present, indicates that there can be more than one painting per image, and the program tries to split them.
-
 - `--k`
   Number of top results to retrieve. Default: `10`.
 
 - `--pkl_output_path`
   Path to save predictions as pickle file (optional).
 
+- `--generate_masks`
+  If present, generates masks using variance-based background removal (HSV S+V channels). Default: `False`.
+
+- `--multiple_paintings`
+  If present, detects and splits images containing multiple paintings. Default: `True`.
+
+- `--visualize`
+  If present, displays interactive visualizations of query results. Default: `False`.
+
+- `--save_visualizations`
+  Directory path to save visualization images (optional).
+
 #### Examples
 
 ```bash
-# Basic usage
-python query_by_sample.py ./data/BBDD ./data/qsd1_w1
+# Basic usage with RootSIFT descriptor
+python query_by_sample.py ./data/BBDD ./data/qsd1_w4
 
-# With multiple color spaces and custom parameters
-python query_by_sample.py ./data/BBDD ./data/qsd1_w1 --color_spaces LAB HSV --k 5
+# With mask generation and multiple painting detection
+python query_by_sample.py ./data/BBDD ./data/qsd1_w4 --generate_masks --multiple_paintings
 
-# Save results to pickle file
-python query_by_sample.py ./data/BBDD ./data/qsd1_w1 --pkl_output_path results.pkl --k 10
+# Save results and visualizations
+python query_by_sample.py ./data/BBDD ./data/qsd1_w4 --pkl_output_path results.pkl --save_visualizations ./visualizations
+
+# Interactive visualization mode
+python query_by_sample.py ./data/BBDD ./data/qsd1_w4 --visualize --k 10
 ```
 
-### Grid Search: `parameter_grid_search.py`
+### Grid Search: `parameter_grid_search_w4.py` (Week 4)
 
-Run a comprehensive grid search over hyperparameters.
+Run a comprehensive grid search over keypoint descriptor hyperparameters.
 
 ```bash
-python parameter_grid_search.py database_path queries_path --results_folder PATH [params]
+python parameter_grid_search_w4.py database_path queries_path --results_folder PATH [params]
 ```
 
 #### Parameters
@@ -90,13 +106,13 @@ python parameter_grid_search.py database_path queries_path --results_folder PATH
 #### Example
 
 ```bash
-python parameter_grid_search.py ./data/BBDD ./data/qsd1_w1 --results_folder results/grid_search
+python parameter_grid_search_w4.py ./data/BBDD ./data/qsd1_w4 --results_folder results/grid_search_w4
 
 # Resume from iteration 100, process every 5th configuration
-python parameter_grid_search.py ./data/BBDD ./data/qsd1_w1 --results_folder results/grid_search --from_iter 100 --every 5
+python parameter_grid_search_w4.py ./data/BBDD ./data/qsd1_w4 --results_folder results/grid_search_w4 --from_iter 100 --every 5
 ```
 
-This will save JSON files (one per configuration) with MAP@1 and MAP@5 results for all distance metrics.
+This will save JSON files (one per configuration) with MAP@1 and MAP@5 results for all keypoint descriptor and scorer combinations.
 
 
 ### Noise removal: `noise_removal.py`
@@ -230,3 +246,39 @@ RGB, HSV, LAB, YCrCb, HLS, CMYK, LUV, XYZ, YUV
 - **`average_precision.py`** - MAP@k evaluation metrics
 
 - **`hyperparameter_combinations.py`** - Grid search parameter generation
+
+### Core Library (`libs_week4/`)
+
+Week 4 introduces keypoint-based descriptors for image retrieval, moving from global histogram descriptors to local feature matching.
+
+- **`descriptor.py`** - Keypoint detection and descriptor computation
+  - **Keypoint Descriptors**:
+    - `RootSIFTDescriptor`: L1-normalized and square-rooted SIFT (improved SIFT variant)
+    - `SIFTDescriptor`: Scale-Invariant Feature Transform
+    - `ORBDescriptor`: Oriented FAST and Rotated BRIEF (fast binary descriptor)
+    - `PCASIFTDescriptor`: SIFT with PCA dimensionality reduction
+  - **Descriptor Matcher**:
+    - `DescriptorMatcher`: Matches keypoint descriptors between images
+      - BruteForce (BF) matcher with various norms (L1, L2, Hamming)
+      - FLANN-based matcher for fast approximate matching
+      - Lowe's ratio test for filtering matches
+      - Cross-check option for bidirectional matching
+  - **Scoring Methods**:
+    - `HomographyScorer`: Scores matches using homography estimation (RANSAC)
+      - Reprojection error penalty
+      - Configurable min_points threshold
+    - `MatchRatioScorer`: Scores based on ratio of good matches to query keypoints
+    - `SymmetricMatchRatioScorer`: Bidirectional match ratio scoring
+    - `HomographyDistanceScorer`: Combines homography quality with geometric distance
+  - `KeypointAndDescriptorMaker`: Integrates preprocessing, color conversion, and descriptor computation
+
+- **`database.py`** - Image database management for keypoint-based retrieval
+  - `Image` class with keypoints, descriptors, and score attributes
+  - `ImageDatabase` class supporting keypoint descriptor workflow
+    - `compute_keypoints_and_descriptors()`: Batch keypoint detection
+    - `compute_keypoint_descriptor_statistics()`: Compute keypoint/descriptor statistics
+    - `query()`: Find similar images using keypoint matching and scoring
+
+- **`hyperparameter_combinations.py`** - Grid search generators for keypoint descriptors
+  - `descriptor_maker_grid_search()`: Iterator over descriptor configurations
+  - `scorer_grid_search()`: Iterator over scorer configurations
